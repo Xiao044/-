@@ -145,6 +145,40 @@ test('project Agent runs are persisted and listed without changing the legacy re
   assert.equal('imageUrl' in listed.runs[0].input, false);
 });
 
+test('project Agent fact warnings identify conflicts and clear after a user correction', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const createResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...validBody('__mock_fact_conflict__'),
+      product: { name: '珍珠项链', facts: { material: '淡水珍珠' } }
+    })
+  });
+  assert.equal(createResponse.status, 201);
+  const created = await createResponse.json();
+  const runId = created.run.runId;
+  const conflictWarning = created.run.output.warnings.find((warning) => warning.field === 'material');
+  assert.equal(conflictWarning.reason, 'contradiction');
+  assert.equal(conflictWarning.detectedValue, '黄金');
+
+  const patchResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs/${encodeURIComponent(runId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft: { rawText: '淡水珍珠项链置于自然窗边，商品主体清晰呈现。' } })
+  });
+  assert.equal(patchResponse.status, 200);
+  const corrected = await patchResponse.json();
+  assert.equal(corrected.run.output.warnings.some((warning) => warning.field === 'material'), false);
+  assert.equal(corrected.run.revisions[0].output.warnings.some((warning) => warning.field === 'material' && warning.reason === 'contradiction'), true);
+});
+
 test('project Agent run detail supports user edits and acceptance', async (t) => {
   const projectsPath = path.join(root, 'data', 'projects.json');
   const originalProjects = fs.readFileSync(projectsPath, 'utf8');

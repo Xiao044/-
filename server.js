@@ -8,6 +8,7 @@ const {
   buildMessages: buildAgentMessages,
   createAgentRunRecord,
   createRunId,
+  collectWarnings,
   legacyStructured,
   normalizeAgentOutput,
   normalizeAgentInputForStorage,
@@ -698,6 +699,13 @@ const handleAgentRuns = async (req, res) => {
       run.output.draft = nextDraft;
       run.output.descriptionA = nextDraft.rawText;
       run.output.descriptionAStructured = legacyStructured(nextDraft);
+      const modelFields = Object.fromEntries(Object.entries(nextDraft.fields)
+        .filter(([, field]) => field?.source === 'agent')
+        .map(([name, field]) => [name, field.value]));
+      run.output.warnings = collectWarnings({
+        descriptionA: nextDraft.rawText,
+        descriptionAStructured: modelFields
+      }, run.input, nextDraft);
       run.accepted = false;
       run.acceptedAt = null;
       run.acceptedVersion = null;

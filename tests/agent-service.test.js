@@ -78,6 +78,125 @@ test('normalizes model output into versioned field envelopes and protects explic
   assert.equal(output.warnings.some((warning) => warning.code === 'FACT_CONFLICT'), true);
 });
 
+test('reports direct material and color contradictions in product claims', () => {
+  const input = validateAgentInput(validInput).value;
+  const materialConflict = normalizeAgentOutput({
+    descriptionA: '黄金项链置于自然窗边，商品主体清晰呈现。',
+    descriptionAStructured: { scene: '自然窗边' }
+  }, input);
+  const materialWarning = materialConflict.warnings.find((warning) => warning.field === 'material');
+  assert.equal(materialWarning.reason, 'contradiction');
+  assert.equal(materialWarning.detectedValue, '黄金');
+  assert.match(materialWarning.message, /淡水珍珠/);
+  assert.match(materialConflict.draft.fields.productFactsSummary.value, /淡水珍珠/);
+
+  const backgroundContrast = normalizeAgentOutput({
+    descriptionA: '乳白色珍珠项链置于黑色背景，柔光表现珠面。',
+    descriptionAStructured: {}
+  }, input);
+  assert.equal(backgroundContrast.warnings.some((warning) => warning.field === 'color' && warning.reason === 'contradiction'), false);
+
+  const colorConflict = normalizeAgentOutput({
+    descriptionA: '黑色项链置于乳白色背景，商品主体清晰呈现。',
+    descriptionAStructured: {}
+  }, input);
+  assert.equal(colorConflict.warnings.some((warning) => warning.field === 'color' && warning.reason === 'contradiction'), true);
+});
+
+test('flags conflicting product dimensions but ignores a different measurement dimension', () => {
+  const input = validateAgentInput({
+    ...validInput,
+    product: { ...validInput.product, facts: { size: '珍珠直径8mm' } }
+  }).value;
+  const conflict = normalizeAgentOutput({
+    descriptionA: '珍珠直径10mm，项链在自然窗边呈现。',
+    descriptionAStructured: {}
+  }, input);
+  assert.equal(conflict.warnings.some((warning) => warning.field === 'size' && warning.reason === 'contradiction'), true);
+
+  const distinctDimensions = normalizeAgentOutput({
+    descriptionA: '项链链长50cm，珍珠直径8mm，置于自然窗边。',
+    descriptionAStructured: {}
+  }, input);
+  assert.equal(distinctDimensions.warnings.some((warning) => warning.field === 'size' && warning.reason === 'contradiction'), false);
+});
+
+test('does not treat a matching number in another dimension as a preserved size fact', () => {
+  const input = validateAgentInput({
+    ...validInput,
+    product: { ...validInput.product, facts: { size: '珍珠直径8mm' } }
+  }).value;
+  const output = normalizeAgentOutput({
+    descriptionA: '项链链长8mm，置于自然窗边。',
+    descriptionAStructured: {}
+  }, input);
+  const sizeWarning = output.warnings.find((warning) => warning.field === 'size');
+
+  assert.equal(sizeWarning.reason, 'not_mentioned');
+});
+
+test('does not treat a background color as a verified product color', () => {
+  const input = validateAgentInput({
+    ...validInput,
+    product: { ...validInput.product, facts: { color: '黑色' } }
+  }).value;
+  const backgroundOnly = normalizeAgentOutput({
+    descriptionA: '黑色背景衬托商品主体，画面置于自然窗边。',
+    descriptionAStructured: {}
+  }, input);
+  const colorWarning = backgroundOnly.warnings.find((warning) => warning.field === 'color');
+
+  assert.equal(colorWarning.reason, 'not_mentioned');
+
+  const productColor = normalizeAgentOutput({
+    descriptionA: '黑色项链作为画面主体，置于自然窗边。',
+    descriptionAStructured: {}
+  }, input);
+  assert.equal(productColor.warnings.some((warning) => warning.field === 'color'), false);
+});
+
+test('recognizes explicitly stated facts outside the known vocabulary', () => {
+  const input = validateAgentInput({
+    ...validInput,
+    product: { ...validInput.product, facts: { material: '黄铜' } }
+  }).value;
+  const output = normalizeAgentOutput({
+    descriptionA: '黄铜耳环作为画面主体，置于自然窗边。',
+    descriptionAStructured: {}
+  }, input);
+
+  assert.equal(output.warnings.some((warning) => warning.field === 'material'), false);
+});
+
+test('does not infer product material from a similarly named background color', () => {
+  const input = validateAgentInput({
+    ...validInput,
+    product: { ...validInput.product, facts: { material: '淡水珍珠' } }
+  }).value;
+  for (const descriptionA of [
+    '黄金色背景衬托项链，商品主体清晰呈现。',
+    '采用黄金色背景衬托项链，商品主体清晰呈现。',
+    '由黄金色背景衬托项链，商品主体清晰呈现。'
+  ]) {
+    const output = normalizeAgentOutput({ descriptionA, descriptionAStructured: {} }, input);
+    const materialWarning = output.warnings.find((warning) => warning.field === 'material');
+    assert.equal(materialWarning.reason, 'not_mentioned', descriptionA);
+  }
+});
+
+test('recognizes a product category stated in the product description', () => {
+  const input = validateAgentInput({
+    ...validInput,
+    product: { ...validInput.product, facts: { category: '项链' } }
+  }).value;
+  const output = normalizeAgentOutput({
+    descriptionA: '珍珠项链在自然窗边呈现。',
+    descriptionAStructured: {}
+  }, input);
+
+  assert.equal(output.warnings.some((warning) => warning.field === 'category'), false);
+});
+
 test('parses JSON objects and rejects invalid or non-object model output', () => {
   assert.deepEqual(parseModelJson('{"reply":"ok"}'), { reply: 'ok' });
   assert.throws(() => parseModelJson('not json'), { code: 'MODEL_INVALID_JSON' });

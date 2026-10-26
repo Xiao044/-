@@ -836,6 +836,9 @@ h1 { font-size: 24px; line-height: 1.25; }
 .structured-brief strong { color: var(--ink, #2e2a22); font-size: 13px; }
 .structured-brief span { white-space: pre-wrap; word-break: break-word; }
 .agent-draft-fields { display: grid; gap: 12px; margin: 0 0 16px; padding: 14px 0; border-top: 1px solid #eee8d6; border-bottom: 1px solid #eee8d6; }
+.agent-fact-warnings { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid #bd805a; border-radius: 4px; background: #fbf0e8; color: #835b43; }
+.agent-fact-warnings strong { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
+.agent-fact-warnings ul { display: grid; gap: 3px; margin: 0; padding-left: 16px; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .agent-draft-field { min-width: 0; }
 .agent-draft-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .agent-field-source { flex: 0 0 auto; padding: 3px 6px; border-radius: 4px; background: #eef0e5; color: #6d7652; font-size: 10px; font-weight: 500; }

@@ -27,7 +27,11 @@ https.request = (_target, _options, callback) => {
         : JSON.stringify({
           reply: '已整理商品资料。',
           followUpQuestion: user.task === 'follow_up' ? '希望使用什么背景？' : '',
-          descriptionA: marker === '__mock_schema_invalid__' ? '' : '商品主体清晰呈现于自然窗边，使用柔和光线和简洁构图。',
+          descriptionA: marker === '__mock_schema_invalid__'
+            ? ''
+            : marker === '__mock_fact_conflict__'
+              ? '黄金项链置于自然窗边，商品主体清晰呈现。'
+              : '商品主体清晰呈现于自然窗边，使用柔和光线和简洁构图。',
           descriptionAStructured: {
             scene: '自然窗边',
             composition: '主体居中',
