@@ -1007,14 +1007,14 @@
         }
       };
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-      const renderAgentWarnings = () => {
-        const warnings = agentWarnings.filter((warning) => warning?.code === 'FACT_CONFLICT');
+      const renderAgentWarnings = (sourceWarnings = agentWarnings) => {
+        const warnings = (Array.isArray(sourceWarnings) ? sourceWarnings : []).filter((warning) => warning?.code === 'FACT_CONFLICT');
         if (!warnings.length) return '';
         return `<section class="agent-fact-warnings" role="status"><strong>请核对商品事实</strong><ul>${warnings.map((warning) => `<li>${escapeHtml(warning.message || '模型输出可能与用户资料不一致。')}</li>`).join('')}</ul></section>`;
       };
-      const refreshAgentWarningPanel = () => {
-        const host = detailContent.querySelector('[data-agent-fact-warnings]');
-        if (host) host.innerHTML = renderAgentWarnings();
+      const refreshAgentWarningPanel = (sourceWarnings = agentWarnings) => {
+        const host = document.querySelector('#node-a [data-agent-fact-warnings]');
+        if (host) host.innerHTML = renderAgentWarnings(sourceWarnings);
       };
       const agentDraftFieldDefinitions = [
         { key: 'productFactsSummary', label: '商品事实摘要', rows: 3 },
@@ -1423,8 +1423,8 @@
           descriptionA = savedRun.output?.draft?.rawText || nextDescription;
           descriptionADraft = savedRun.output?.draft || descriptionADraft;
           descriptionAStructured = savedRun.output?.descriptionAStructured || descriptionAStructured;
-          agentWarnings = Array.isArray(savedRun.output?.warnings) ? savedRun.output.warnings : agentWarnings;
-          refreshAgentWarningPanel();
+          if (Array.isArray(savedRun.output?.warnings)) agentWarnings = savedRun.output.warnings;
+          refreshAgentWarningPanel(savedRun.output?.warnings);
           currentAgentRunVersion = Number(savedRun.version) || currentAgentRunVersion;
         } else {
           const timestamp = new Date().toISOString();

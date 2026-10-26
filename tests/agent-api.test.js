@@ -20,7 +20,7 @@ const getAvailablePort = () => new Promise((resolve, reject) => {
 
 const startServer = async (t, { apiKey = '', mock = false } = {}) => {
   const port = await getAvailablePort();
-  const env = { ...process.env, PORT: String(port), DEEPSEEK_BASE_URL: 'https://mock.deepseek.invalid' };
+  const env = { ...process.env, PORT: String(port), DEEPSEEK_BASE_URL: 'https://mock.deepseek.invalid', DEEPSEEK_MODEL: '4.0flash' };
   env.DEEPSEEK_API_KEY = apiKey;
   const child = spawn(process.execPath, [...(mock ? ['-r', mockPath] : []), serverPath], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
