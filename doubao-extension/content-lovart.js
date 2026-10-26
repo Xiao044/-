@@ -1,0 +1,20 @@
+const PLATFORM = 'lovart';
+const CONFIG = { loginPath: /login|signin|auth/i, loginLabels: /log in|sign in|登录|注册/i, submitLabels: /generate|create|submit|生成|创作/i, resultSelectors: ['[class*="result" i] img', '[class*="gallery" i] img', 'main img'], minArea: 14000, excludeUrl: /avatar|profile|logo|icon|thumbnail/i };
+const postStatus = (state, message, results, errorCode, meta = {}) => chrome.runtime.sendMessage({ type: 'ZAOTU_STATUS', platform: PLATFORM, jobId: window.__zaotuJobId, attemptId: meta.attemptId || window.__zaotuAttemptId, timestamp: meta.timestamp || new Date().toISOString(), state, message, errorCode: errorCode || ZaotuPlatform.errorCodeFor(state), results });
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'ZAOTU_PLATFORM_PING') { sendResponse({ ok: true, platform: PLATFORM }); return false; }
+  if (message?.type !== 'ZAOTU_RUN_PLATFORM_JOB' || message.platform !== PLATFORM) return;
+  window.__zaotuJobId = message.job.jobId;
+  window.__zaotuAttemptId = message.job.attemptId || `${Date.now().toString(36)}-lovart`;
+  ZaotuPlatform.run({ platform: PLATFORM, job: message.job, config: CONFIG, status: postStatus }).then(sendResponse).catch((error) => { postStatus('adapter_error', error.message || 'Lovart 页面操作失败。'); sendResponse({ ok: false, state: 'adapter_error' }); });
+  return true;
+});
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'ZAOTU_CANCEL_PLATFORM_JOB' || message.platform !== PLATFORM) return;
+  if (!message.jobId || message.jobId === window.__zaotuJobId) {
+    ZaotuPlatform.cancel();
+    postStatus('cancelled', '已取消 Lovart 当前任务。', undefined, 'CANCELLED');
+    sendResponse({ ok: true, state: 'cancelled' });
+  }
+  return false;
+});

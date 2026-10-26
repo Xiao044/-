@@ -1,0 +1,2070 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f7f5ed">
+  <meta name="description" content="商品生图工作台：从商品资料、Agent 文字整理，到多平台生成。">
+  <title>造图 · 商品影像工作台</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./scroll-workspace.css">
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 8V6a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1ZM4 10h16"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.5"/><path d="m5 17 5-5 3 3 3-4 4 5"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 4h12a1 1 0 0 1 1 1v15l-7-3-7 3V5a1 1 0 0 1 1-1ZM9 8h6M9 11h4"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M9.8 9a2.4 2.4 0 0 1 4.6.9c0 1.6-2.4 1.8-2.4 3.4M12 16h.01"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m6 12 4 4 8-8"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><path d="M4 7v5h5M5 11a7 7 0 1 1 1 6M12 8v4l3 2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M6 4h10l3 3v12H5V4ZM9 4v6h6V4M9 19v-6h6v6"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/><path d="M10 9v6M14 9v6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 5v8l-8 5-8-5V8Zm-8 5 8 5 8-5M12 13v8M8 5.5l8 5"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m14 5 5 5M4 20l5-1L20 8a2.1 2.1 0 0 0-3-3L6 16Z"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 7 3v6c0 4-7 9-7 9S5 16 5 12V6Zm-3 9 2 2 4-4"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 18V6M7 11l5-5 5 5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="7" y="10" width="10" height="9" rx="2"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M7 4h10v16H7ZM10 8h4M10 12h4M10 16h2"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></symbol>
+  </svg>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="#workspace" aria-label="造图工作台首页">
+        <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="brand-copy"><strong>造图<span>studio</span></strong><small>让好商品被看见</small></span>
+      </a>
+      <button class="new-project" type="button" aria-label="新建项目"><svg class="ui-icon"><use href="#i-plus"/></svg><span>新建项目</span></button>
+      <nav class="primary-nav" aria-label="工作空间">
+        <p class="nav-heading">工作空间</p>
+        <span class="nav-highlight" aria-hidden="true"></span>
+        <a class="nav-item active" href="#workspace" data-nav-target="workspace" data-nav-submenu="nav-submenu-workspace" aria-current="page" aria-expanded="true" aria-controls="nav-submenu-workspace" aria-label="工作台"><svg class="ui-icon"><use href="#i-grid"/></svg><span>工作台</span><i class="nav-current-dot"></i><b class="nav-chevron" aria-hidden="true">⌄</b></a>
+        <div class="nav-submenu is-open" id="nav-submenu-workspace" aria-label="工作台子菜单"><a href="#workflow" data-nav-subitem="workflow">创作流程</a><a href="#node-agent-title" data-nav-subitem="agent">Agent 整理</a></div>
+        <a class="nav-item" href="#project" data-nav-target="project" data-nav-submenu="nav-submenu-project" aria-expanded="false" aria-controls="nav-submenu-project" aria-label="我的项目"><svg class="ui-icon"><use href="#i-folder"/></svg><span>我的项目</span><small>03</small><b class="nav-chevron" aria-hidden="true">⌄</b></a>
+        <div class="nav-submenu" id="nav-submenu-project" aria-label="我的项目子菜单"><a href="#project" data-nav-subitem="project">当前项目</a><a href="#project" data-nav-subitem="versions">版本记录</a></div>
+        <a class="nav-item" href="#materials" data-nav-target="materials" data-nav-submenu="nav-submenu-materials" aria-expanded="false" aria-controls="nav-submenu-materials" aria-label="素材库"><svg class="ui-icon"><use href="#i-image"/></svg><span>素材库</span><b class="nav-chevron" aria-hidden="true">⌄</b></a>
+        <div class="nav-submenu" id="nav-submenu-materials" aria-label="素材库子菜单"><a href="#materials" data-nav-subitem="asset">商品主图</a><a href="#properties-title" data-nav-subitem="facts">商品属性</a></div>
+        <a class="nav-item" href="#node-a-title" data-nav-target="prompts" data-nav-submenu="nav-submenu-prompts" aria-expanded="false" aria-controls="nav-submenu-prompts" aria-label="提示词库"><svg class="ui-icon"><use href="#i-bookmark"/></svg><span>提示词库</span><b class="nav-chevron" aria-hidden="true">⌄</b></a>
+        <div class="nav-submenu" id="nav-submenu-prompts" aria-label="提示词库子菜单"><a href="#node-a-title" data-nav-subitem="description">描述词 A</a><a href="#node-b-title" data-nav-subitem="prompt">提示词 B</a></div>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-tip">
+          <svg class="ui-icon tip-sun"><use href="#i-sun"/></svg>
+          <strong>好想法，慢慢成形。</strong>
+          <p>每一步都可以停下来，<br>让创作保持自己的节奏。</p>
+          <a href="#workflow">了解工作流 <span aria-hidden="true">↗</span></a>
+        </div>
+        <a class="help-link" href="#prototype-note" aria-label="使用指南"><svg class="ui-icon"><use href="#i-help"/></svg><span>使用指南</span><span aria-hidden="true">↗</span></a>
+        <div class="profile"><div class="avatar">M</div><div class="profile-copy"><strong>我的工作空间</strong><small>个人创作空间</small></div><span class="profile-chevron" aria-hidden="true">⌃<br>⌄</span></div>
+      </div>
+    </aside>
+    <main class="app-main" id="workspace">
+      <header class="topbar">
+        <div class="breadcrumb"><span>我的项目</span><span class="breadcrumb-divider">/</span><strong>珍珠项链 · 春日上新</strong><span class="demo-label">示例项目</span></div>
+        <div class="topbar-right"><span class="save-state"><svg class="ui-icon"><use href="#i-check"/></svg>草稿已保存</span><span class="topbar-divider"></span><div class="topbar-menu"><button class="icon-button topbar-menu-toggle" aria-label="项目更多选项" aria-haspopup="menu" aria-expanded="false" type="button"><svg class="ui-icon"><use href="#i-more"/></svg></button><div class="topbar-dropdown" role="menu" aria-label="项目更多选项" aria-hidden="true"><button type="button" role="menuitem" data-topbar-action="copy-link"><svg class="ui-icon"><use href="#i-external"/></svg><span>复制项目链接</span></button><button type="button" role="menuitem" data-topbar-action="save-copy"><svg class="ui-icon"><use href="#i-save"/></svg><span>另存为副本</span></button><button type="button" role="menuitem" data-topbar-action="archive"><svg class="ui-icon"><use href="#i-folder"/></svg><span>归档项目</span></button></div></div></div>
+      </header>
+      <div class="page-content">
+        <section class="welcome-row" id="project">
+          <div><div class="page-kicker"><svg class="ui-icon"><use href="#i-sun"/></svg>一点灵感，慢慢成像</div><h1>商品图工作台<span class="title-period">.</span></h1><p class="page-description">把商品信息变成创作方向，让每一步都有迹可循。</p></div>
+          <div class="project-tools"><button class="button button-secondary" type="button" data-open-task-center><svg class="ui-icon"><use href="#i-grid"/></svg>任务中心</button><button class="button button-secondary" type="button"><svg class="ui-icon"><use href="#i-clock"/></svg>版本记录</button><button class="button button-primary" type="button"><svg class="ui-icon"><use href="#i-save"/></svg>保存项目</button></div>
+        </section>
+        <section class="workflow-panel" id="workflow" aria-labelledby="workflow-title">
+          <div class="workflow-heading"><div><h2 id="workflow-title">创作流程</h2><span class="workflow-caption">一步一步，让想法更清晰</span></div><span class="workflow-hint"><svg class="ui-icon"><use href="#i-pause"/></svg>已完成步骤可点击回退</span></div>
+          <div class="step-scroll"><ol class="step-track">
+            <li class="flow-step completed"><button class="flow-step-button" type="button" data-step-jump="0" aria-label="回到商品资料"><span class="step-number"><svg class="ui-icon"><use href="#i-check"/></svg></span><span class="step-text"><strong>商品资料</strong><small>已完成</small></span></button><span class="step-link" aria-hidden="true"></span></li>
+            <li class="flow-step current" aria-current="step"><button class="flow-step-button" type="button" data-step-jump="1" aria-label="回到 Agent 整理"><span class="step-number">02</span><span class="step-text"><strong>Agent 整理</strong><small><i></i>等待回答</small></span></button><span class="step-link" aria-hidden="true"></span></li>
+            <li class="flow-step"><button class="flow-step-button" type="button" data-step-jump="2" aria-label="回到描述词 A" disabled><span class="step-number">03</span><span class="step-text"><strong>描述词 A</strong><small>确认创作简报</small></span></button><span class="step-link" aria-hidden="true"></span></li>
+            <li class="flow-step"><button class="flow-step-button" type="button" data-step-jump="3" aria-label="回到提示词 B" disabled><span class="step-number">04</span><span class="step-text"><strong>提示词 B</strong><small>完善生图提示词</small></span></button><span class="step-link" aria-hidden="true"></span></li>
+            <li class="flow-step"><button class="flow-step-button" type="button" data-step-jump="4" aria-label="回到多平台生成" disabled><span class="step-number">05</span><span class="step-text"><strong>多平台生成</strong><small>生成并导入结果</small></span></button></li>
+          </ol></div>
+        </section>
+        <div class="creative-layout">
+          <section class="canvas-column" aria-label="商品创作画布">
+            <div class="workflow-canvas" id="workflow-canvas" aria-label="五步商品创作节点">
+            <section class="workflow-node" data-workflow-node="0" data-scroll-region="product" aria-labelledby="node-product-title">
+              <div class="workflow-node-rail"><span class="workflow-node-marker"><span>01</span></span></div>
+              <div class="workflow-node-main">
+                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 01 · FOUNDATION</span><h2 id="node-product-title">商品资料</h2><p>先确认商品本身，再开始构思画面</p></div><span class="node-state is-complete"><svg class="ui-icon"><use href="#i-check"/></svg>已完成</span></header>
+            <section class="canvas-panel" aria-labelledby="canvas-title">
+              <header class="canvas-toolbar">
+                <div><h2 id="canvas-title">创作画布</h2><p>商品原图、提示词与生成结果</p></div>
+                <span class="canvas-indicator"><svg class="ui-icon"><use href="#i-image"/></svg>商品主图</span>
+              </header>
+              <div class="canvas-surface">
+                <article class="canvas-artboard">
+                  <div class="artboard-heading"><span>商品原图</span><span>当前项目素材</span></div>
+                  <div class="product-visual"><img src="./assets/pearl-necklace.svg" alt="奶油色背景上的珍珠项链示例插画"></div>
+                  <div class="canvas-product-caption"><div><h3 id="canvas-product-name">春日珍珠项链</h3><p class="product-subtitle">温润珠光 · 轻盈日常</p></div><svg class="ui-icon" aria-hidden="true"><use href="#i-box"/></svg></div>
+                  <div class="product-note"><svg class="ui-icon"><use href="#i-doc"/></svg><div><span>创作方向</span><p>“希望画面自然、干净，有春天的轻盈感，让商品成为视觉中心。”</p></div></div>
+                </article>
+              </div>
+            </section>
+              </div>
+            </section>
+            <section class="workflow-node" data-workflow-node="1" data-scroll-region="agent" aria-labelledby="node-agent-title">
+              <div class="workflow-node-rail"><span class="workflow-node-marker"><span>02</span></span></div>
+              <div class="workflow-node-main">
+                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 02 · DISCOVERY</span><h2 id="node-agent-title">Agent 整理</h2><p>补充场景与方向，把商品信息转成创作简报</p></div><span class="node-state is-current"><i></i>进行中</span></header>
+          <section class="panel agent-panel" aria-labelledby="agent-title">
+            <header class="panel-heading"><div class="heading-with-icon"><span class="panel-icon agent-icon"><svg class="ui-icon"><use href="#i-sparkle"/></svg></span><div><h2 id="agent-title">把灵感说得更具体</h2><p>Agent · 文字信息整理</p></div></div><span class="status-pill"><i></i>等待回答</span></header>
+            <div class="agent-history-toolbar"><button class="text-button agent-history-trigger" type="button" data-open-agent-history><svg class="ui-icon"><use href="#i-clock"/></svg>运行历史</button></div>
+            <div class="agent-body">
+              <div class="agent-greeting"><span class="agent-face" aria-hidden="true"><i></i><i></i><b></b></span><div><strong>已经有一个不错的开始。</strong><p>商品资料已整理好，再补充一个画面方向，<br class="wide-only">就可以生成第一版描述词。</p></div></div>
+              <div class="question-box"><div class="question-meta"><span>补充创作方向</span><span>01 / 01</span></div><h3>你希望商品出现在什么场景里？</h3><p>选一个接近的方向，也可以写下自己的想法。</p><div class="scene-options"><button class="scene-option selected" type="button">自然窗边<svg class="ui-icon"><use href="#i-check"/></svg></button><button class="scene-option" type="button">纯色静物台</button><button class="scene-option" type="button">春日户外</button></div></div>
+              <div class="reply-box"><textarea aria-label="补充场景描述" placeholder="例如：午后窗边，浅色亚麻布，柔和的自然光…"></textarea><button type="button" aria-label="提交场景描述"><svg class="ui-icon"><use href="#i-send"/></svg></button></div>
+              <div class="agent-privacy"><svg class="ui-icon"><use href="#i-shield"/></svg>仅处理文字资料，不进行图片识别</div>
+            </div>
+            <footer class="agent-actions"><button class="interrupt-button" type="button"><span aria-hidden="true"></span>中断节点</button><button class="button button-primary next-button" type="button">生成描述词 A<svg class="ui-icon"><use href="#i-arrow"/></svg></button></footer>
+              </div>
+            </section>
+            <div class="workflow-connector" data-connector="0" aria-hidden="true"><span></span></div>
+            <section class="workflow-node is-locked" id="node-a" data-workflow-node="2" data-step-name="a" data-scroll-region="detail" aria-labelledby="node-a-title">
+              <div class="workflow-node-rail"><span class="workflow-node-marker"><span>03</span></span></div>
+              <div class="workflow-node-main">
+                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 03 · CREATIVE BRIEF</span><h2 id="node-a-title">描述词 A</h2><p>确认商品事实、画面方向与约束</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="a" disabled>编辑节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
+                <div class="node-locked-state" data-node-gate="a"><svg class="ui-icon"><use href="#i-lock"/></svg><span>完成 Agent 整理后解锁</span></div>
+                <section class="workflow-detail" data-node-detail="a" hidden aria-live="polite"><div class="detail-header"><div><span class="detail-kicker">03 / 描述词 A</span><h3>确认创作简报</h3></div><button class="icon-button detail-close" type="button" data-detail-close="a" aria-label="收起描述词 A">×</button></div><div class="detail-content" data-step-content="a"></div></section>
+              </div>
+            </section>
+            <div class="workflow-connector" data-connector="1" aria-hidden="true"><span></span></div>
+            <section class="workflow-node is-locked" data-workflow-node="3" data-step-name="b" data-scroll-region="detail" aria-labelledby="node-b-title">
+              <div class="workflow-node-rail"><span class="workflow-node-marker"><span>04</span></span></div>
+              <div class="workflow-node-main">
+                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 04 · IMAGE PROMPT</span><h2 id="node-b-title">提示词 B</h2><p>完善投递给各生图平台的执行指令</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="b" disabled>编辑节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
+                <div class="node-locked-state" data-node-gate="b"><svg class="ui-icon"><use href="#i-lock"/></svg><span>确认描述词 A 后解锁</span></div>
+                <section class="workflow-detail" data-node-detail="b" hidden aria-live="polite"><div class="detail-header"><div><span class="detail-kicker">04 / 提示词 B</span><h3>完善生图提示词</h3></div><button class="icon-button detail-close" type="button" data-detail-close="b" aria-label="收起提示词 B">×</button></div><div class="detail-content" data-step-content="b"></div></section>
+              </div>
+            </section>
+            <div class="workflow-connector" data-connector="2" aria-hidden="true"><span></span></div>
+            <section class="workflow-node is-locked" data-workflow-node="4" data-step-name="c" data-scroll-region="detail" aria-labelledby="node-c-title">
+              <div class="workflow-node-rail"><span class="workflow-node-marker"><span>05</span></span></div>
+              <div class="workflow-node-main">
+                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 05 · GENERATION</span><h2 id="node-c-title">多平台生成</h2><p>选择生成平台，挑选成片并归档到项目</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="c" disabled>打开节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
+                <div class="node-locked-state" data-node-gate="c"><svg class="ui-icon"><use href="#i-lock"/></svg><span>确认提示词 B 后解锁</span></div>
+                <section class="workflow-detail generation-detail" data-node-detail="c" hidden aria-live="polite"><div class="detail-header"><div><span class="detail-kicker">05 / 多平台生成</span><h3>生成并归档成片</h3></div><button class="icon-button detail-close" type="button" data-detail-close="c" aria-label="收起多平台生成">×</button></div><div class="detail-content" data-step-content="c"></div></section>
+              </div>
+            </section>
+            </div>
+          </section>
+          <aside class="inspector-column" aria-label="素材与商品属性">
+            <section class="panel inspector-panel" id="materials" aria-labelledby="product-title">
+              <header class="panel-heading inspector-heading"><div><h2 id="product-title">素材与属性</h2><p>商品事实作为创作依据</p></div></header>
+              <section class="inspector-section" aria-labelledby="asset-title">
+                <header class="inspector-section-heading"><h3 id="asset-title">素材</h3><span>主图</span></header>
+                <div class="inspector-asset"><img src="./assets/pearl-necklace.svg" alt="珍珠项链商品素材"><div class="asset-copy"><strong>商品原图</strong><span>当前项目素材</span></div><button class="image-upload-button" type="button" aria-label="替换商品图片"><svg class="ui-icon"><use href="#i-image"/></svg><span>替换</span></button><input class="image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择商品图片"></div>
+              </section>
+              <section class="inspector-section product-properties" aria-labelledby="properties-title">
+                <header class="inspector-section-heading"><h3 id="properties-title">商品属性</h3><button class="text-button" type="button">编辑<svg class="ui-icon"><use href="#i-edit"/></svg></button></header>
+                <div class="product-details"><span class="category-label">JEWELRY COLLECTION</span><h3>春日珍珠项链</h3><p class="product-subtitle">温润珠光 · 轻盈日常</p>
+                  <dl class="product-facts"><div><dt>商品品类</dt><dd>珠宝配饰 / 项链</dd></div><div><dt>商品材质</dt><dd>淡水珍珠、金色金属配件</dd></div><div><dt>图片用途</dt><dd>春季上新 · 电商场景图</dd></div></dl>
+                  <div class="keep-details"><span>需要保留</span><div><span>珍珠色泽</span><span>项链结构</span><span>吊坠形状</span></div></div>
+                </div>
+              </section>
+            </section>
+          </aside>
+        </div>
+        <footer class="page-footer" id="prototype-note"><span>造图 studio <i>·</i> 留一点空间给灵感</span><span>界面预览 · 示例内容</span></footer>
+      </div>
+    </main>
+  </div>
+  <div class="interaction-toast" role="status" aria-live="polite"></div>
+  <dialog class="app-modal" id="app-modal" aria-labelledby="modal-title">
+    <div class="modal-shell">
+      <header class="modal-header"><div><span class="detail-kicker">项目工具</span><h2 id="modal-title">编辑商品资料</h2></div><button class="icon-button modal-close" type="button" aria-label="关闭弹窗">×</button></header>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </dialog>
+  <script>
+    (() => {
+      const sceneOptions = [...document.querySelectorAll('.scene-option')];
+      const interruptButton = document.querySelector('.interrupt-button');
+      const nextButton = document.querySelector('.next-button');
+      const saveButton = document.querySelector('.button-primary:not(.next-button)');
+      const saveState = document.querySelector('.save-state');
+      const statusPill = document.querySelector('.status-pill');
+      const currentStep = document.querySelector('.flow-step.current');
+      const currentStepLabel = currentStep?.querySelector('.step-text small');
+      const toast = document.querySelector('.interaction-toast');
+      const storageKey = 'zaotu-workbench-demo-v1';
+      let projectId = 'demo-pearl-necklace';
+      let projectApiUrl = `/api/projects/${projectId}`;
+      let toastTimer;
+      let editingAgent = false;
+      let interrupted = false;
+      let generated = false;
+      let progress = 1;
+      let descriptionA = '';
+      let descriptionAStructured = {};
+      let descriptionADraft = null;
+      let descriptionAFieldEdits = {};
+      let currentAgentRunId = '';
+      let currentAgentRunVersion = 0;
+      let agentRunHistory = [];
+      let selectedAgentHistoryRunId = '';
+      let latestAgentDraftVersion = 0;
+      let aReferenceImageUrl = '';
+      let promptB = '';
+      let resultGenerated = false;
+      let resultSelected = -1;
+      let generatedResults = [];
+      let invalidatedGenerationJobs = new Set();
+      let doubaoBridgeState = 'idle';
+      let doubaoExtensionReady = false;
+      let doubaoAttemptId = 0;
+      const platformOpenTimers = new Map();
+      const generationPlatforms = { chatgpt: { label: 'ChatGPT', state: 'idle', message: '' }, gemini: { label: 'Gemini', state: 'idle', message: '' }, lovart: { label: 'Lovart', state: 'idle', message: '' }, doubao: { label: '豆包', state: 'idle', message: '' } };
+      let generationJobId = '';
+      let generationResendSourceJobId = '';
+      let productState = { name: '春日珍珠项链', subtitle: '温润珠光 · 轻盈日常', description: '希望画面自然、干净，有春天的轻盈感，让商品成为视觉中心。', imageUrl: './assets/pearl-necklace.svg' };
+      let versions = [];
+      let projectName = '珍珠项链 · 春日上新';
+      let agentNote = '';
+      let agentBusy = false;
+      let serverUpdatedAt = '';
+      let serverSyncBusy = false;
+      let selectedGenerationPlatforms = new Set(['doubao']);
+
+      // The starter project includes a visual placeholder. It is not an uploaded
+      // product asset and must never be sent to a platform as source material.
+      const isExampleProductImage = (url) =>
+        /(?:^|\/)assets\/pearl-necklace\.svg(?:[?#].*)?$/i.test(String(url || ''));
+      const hasUploadedProductImage = () =>
+        Boolean(productState.imageUrl && !isExampleProductImage(productState.imageUrl));
+      const persistedResults = () => generatedResults
+        .filter((result) => !/^data:image\//i.test(String(result?.url || '')) && !/^blob:/i.test(String(result?.url || '')))
+        .map(({ imageDataUrl, imageMimeType, ...result }) => result);
+
+      const persistState = () => {
+        try {
+          const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
+          window.localStorage.setItem(storageKey, JSON.stringify({
+            selectedScene: selectedOption?.textContent.trim() || '',
+            interrupted,
+            generated,
+            progress,
+            descriptionA,
+            descriptionAStructured,
+            descriptionADraft,
+            descriptionAFieldEdits,
+            currentAgentRunId,
+            currentAgentRunVersion,
+            aReferenceImageUrl,
+            promptB,
+            resultGenerated,
+            resultSelected,
+            generatedResults: persistedResults(),
+            invalidatedGenerationJobs: [...invalidatedGenerationJobs].slice(-20),
+            doubaoBridgeState,
+            generationJobId,
+            generationResendSourceJobId,
+            selectedGenerationPlatforms: [...selectedGenerationPlatforms],
+            product: productState,
+            versions,
+            projectName,
+            projectId,
+            agentNote,
+            updatedAt: new Date().toISOString()
+          }));
+        } catch (error) {
+          // Local storage can be unavailable in private browsing; the UI still works.
+        }
+      };
+
+      const serializeProject = () => {
+        const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
+        return {
+          selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
+          descriptionA, promptB, resultGenerated, resultSelected, product: productState, versions,
+          currentAgentRunId, currentAgentRunVersion,
+          descriptionAStructured,
+          descriptionADraft,
+          descriptionAFieldEdits,
+          aReferenceImageUrl,
+          generatedResults: persistedResults(),
+          invalidatedGenerationJobs: [...invalidatedGenerationJobs].slice(-20),
+          doubaoBridgeState,
+          generationJobId,
+          generationResendSourceJobId,
+          selectedGenerationPlatforms: [...selectedGenerationPlatforms],
+          projectName, agentNote,
+          agentReply: document.querySelector('.agent-greeting strong')?.textContent || '',
+          agentQuestion: document.querySelector('.agent-greeting p')?.textContent || '',
+          updatedAt: new Date().toISOString()
+        };
+      };
+      const syncProject = async (showFeedback = false) => {
+        if (serverSyncBusy) return;
+        serverSyncBusy = true;
+        try {
+          const response = await fetch(projectApiUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serializeProject()) });
+          if (!response.ok) throw new Error('sync failed');
+          const payload = await response.json();
+          serverUpdatedAt = payload.project?.updatedAt || serverUpdatedAt;
+          if (showFeedback) showToast('项目已同步到服务端');
+        } catch (error) {
+          if (showFeedback) showToast('服务端暂不可用，已保存在本地');
+        } finally { serverSyncBusy = false; }
+      };
+      const ensureProjectOnServer = async () => {
+        const current = await fetch(projectApiUrl, { cache: 'no-store' });
+        if (current.ok) return;
+        if (current.status !== 404) throw new Error('项目暂时无法读取，请稍后重试');
+        const created = await fetch(projectApiUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(serializeProject())
+        });
+        if (!created.ok) throw new Error('项目未能保存到服务端，请稍后重试');
+      };
+      const restoreAgentRunsFromServer = async () => {
+        try {
+          const response = await fetch(`${projectApiUrl}/agent-runs`, { cache: 'no-store' });
+          if (!response.ok) return;
+          const payload = await response.json();
+          agentRunHistory = Array.isArray(payload.runs) ? payload.runs : [];
+          latestAgentDraftVersion = Number(payload.latestDraftVersion) || 0;
+          const currentRun = agentRunHistory.find((run) => run.runId === currentAgentRunId && run.output?.draft);
+          const matchesCurrentDraft = (run) => run?.output?.draft && (!descriptionA || run.output.draft.rawText === descriptionA);
+          const acceptedRun = agentRunHistory.find((run) => run.runId === payload.acceptedRunId && matchesCurrentDraft(run));
+          const latestDraft = agentRunHistory.find((run) => run.task === 'description_a' && run.status === 'completed' && matchesCurrentDraft(run));
+          if (!currentRun) currentAgentRunId = acceptedRun?.runId || latestDraft?.runId || '';
+          const selectedRun = agentRunHistory.find((run) => run.runId === currentAgentRunId);
+          currentAgentRunVersion = Number(selectedRun?.version) || 0;
+          if (selectedRun?.output?.draft && (!descriptionA || selectedRun.output.draft.rawText === descriptionA)) {
+            descriptionADraft = selectedRun.output.draft;
+            descriptionAStructured = selectedRun.output.descriptionAStructured || descriptionAStructured;
+          }
+        } catch (error) { /* Existing project state remains usable offline. */ }
+      };
+      const uploadProductImage = async (file) => {
+        if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
+        if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
+        const shouldResetDownstream = progress > 1;
+        if (shouldResetDownstream) {
+          const accepted = window.confirm('更换商品图片会影响后续创作内容。Agent 回答、描述词、提示词和生成结果需要重做。是否清除下游进度并继续？');
+          if (!accepted) return;
+        }
+        const images = document.querySelectorAll('.product-visual img, .inspector-asset img');
+        const previewUrl = URL.createObjectURL(file);
+        images.forEach((image) => {
+          image.src = previewUrl;
+          image.alt = `${productState.name}商品图片`;
+        });
+        showToast('正在上传商品图片');
+        try {
+          const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '图片上传失败');
+          if (shouldResetDownstream) resetDownstream(0);
+          productState.imageUrl = payload.url;
+          renderProduct();
+          persistState();
+          await syncProject();
+          showToast('商品图片已上传并保存');
+        } catch (error) {
+          showToast(error.message || '图片上传失败，已保留本地预览');
+        } finally { URL.revokeObjectURL(previewUrl); }
+      };
+      const uploadABriefImage = async (file) => {
+        if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
+        if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
+        if (progress > 2) {
+          const accepted = window.confirm('更换 A 版参考图会影响提示词 B 和生成结果。是否清除下游内容并继续？');
+          if (!accepted) return;
+          resetDownstream(2);
+        }
+        showToast('正在上传 A 版参考图');
+        try {
+          const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.url) throw new Error(payload.error || 'A 版参考图上传失败');
+          aReferenceImageUrl = payload.url;
+          persistState();
+          await syncProject();
+          showToast('A 版参考图已上传');
+          openDetail('a', false);
+        } catch (error) { showToast(error.message || 'A 版参考图上传失败'); }
+      };
+      const restoreProjectFromServer = async () => {
+        try {
+          const response = await fetch(projectApiUrl, { cache: 'no-store' });
+          if (!response.ok) return;
+          const serverProject = (await response.json()).project;
+          if (!serverProject) return;
+          const localRaw = window.localStorage.getItem(storageKey);
+          const localProject = localRaw ? JSON.parse(localRaw) : null;
+          const serverTime = Date.parse(serverProject.updatedAt || '') || 0;
+          const localTime = Date.parse(localProject?.updatedAt || '') || 0;
+          if (serverTime <= localTime) return;
+          window.localStorage.setItem(storageKey, JSON.stringify(serverProject));
+          window.location.reload();
+        } catch (error) { /* localStorage remains the offline fallback */ }
+      };
+      const restoreGenerationJobFromServer = async () => {
+        if (!generationJobId) return;
+        try {
+          const response = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}`, { cache: 'no-store' });
+          if (!response.ok) return;
+          const payload = await response.json();
+          if (payload.job) hydrateGenerationJob(payload.job);
+        } catch (error) { /* local project state remains available when the task service is offline */ }
+      };
+
+      const showToast = (message) => {
+        toast.textContent = message;
+        toast.classList.add('visible');
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2400);
+      };
+
+      const nav = document.querySelector('.primary-nav');
+      const navItems = [...document.querySelectorAll('.nav-item')];
+      const navHighlight = document.querySelector('.nav-highlight');
+      const navSections = {
+        workspace: document.querySelector('#workflow'),
+        project: document.querySelector('#project'),
+        materials: document.querySelector('#materials'),
+        prompts: document.querySelector('[data-step-name="a"]')
+      };
+      const closeNavMenus = (except = null) => {
+        navItems.forEach((item) => {
+          const submenu = item.dataset.navSubmenu ? document.getElementById(item.dataset.navSubmenu) : null;
+          if (!submenu || item === except) return;
+          item.setAttribute('aria-expanded', 'false');
+          submenu.classList.remove('is-open');
+        });
+      };
+      const moveNavHighlight = (item) => {
+        if (!item || !navHighlight || !nav) return;
+        navHighlight.style.transform = `translateY(${item.offsetTop}px)`;
+        navHighlight.style.height = `${item.offsetHeight}px`;
+      };
+      const setNavActive = (item, expand = false) => {
+        if (!item) return;
+        closeNavMenus(item);
+        navItems.forEach((candidate) => {
+          candidate.classList.toggle('active', candidate === item);
+          if (candidate !== item) candidate.removeAttribute('aria-current');
+        });
+        item.setAttribute('aria-current', 'page');
+        moveNavHighlight(item);
+        if (expand && item.dataset.navSubmenu) {
+          const submenu = document.getElementById(item.dataset.navSubmenu);
+          const willOpen = !submenu?.classList.contains('is-open');
+          if (submenu && window.innerWidth <= 1080) submenu.style.top = `${item.offsetTop + item.offsetHeight + 4}px`;
+          item.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+          submenu?.classList.toggle('is-open', willOpen);
+          window.requestAnimationFrame(() => moveNavHighlight(item));
+        }
+      };
+      navItems.forEach((item) => item.addEventListener('click', (event) => {
+        const submenu = item.dataset.navSubmenu ? document.getElementById(item.dataset.navSubmenu) : null;
+        setNavActive(item, Boolean(submenu));
+        if (submenu) event.preventDefault();
+      }));
+      nav?.querySelectorAll('[data-nav-subitem]').forEach((item) => item.addEventListener('click', () => {
+        const parent = item.closest('.nav-submenu')?.previousElementSibling;
+        setNavActive(parent, false);
+        if (item.dataset.navSubitem === 'versions') openVersionHistory();
+      }));
+      window.addEventListener('resize', () => {
+        const activeItem = document.querySelector('.nav-item.active');
+        moveNavHighlight(activeItem);
+        const openItem = navItems.find((item) => item.getAttribute('aria-expanded') === 'true');
+        const openSubmenu = openItem?.dataset.navSubmenu ? document.getElementById(openItem.dataset.navSubmenu) : null;
+        if (openItem && openSubmenu && window.innerWidth <= 1080) openSubmenu.style.top = `${openItem.offsetTop + openItem.offsetHeight + 4}px`;
+      });
+      window.requestAnimationFrame(() => {
+        const activeItem = document.querySelector('.nav-item.active');
+        moveNavHighlight(activeItem);
+        const activeSubmenu = activeItem?.dataset.navSubmenu ? document.getElementById(activeItem.dataset.navSubmenu) : null;
+        if (activeSubmenu && window.innerWidth <= 1080) activeSubmenu.style.top = `${activeItem.offsetTop + activeItem.offsetHeight + 4}px`;
+      });
+      const navObserver = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible) return;
+        const item = navItems.find((candidate) => candidate.dataset.navTarget === visible.target.dataset.navSection);
+        if (item) setNavActive(item, false);
+      }, { rootMargin: '-20% 0px -58% 0px', threshold: [0.1, 0.35, 0.65] }) : null;
+      Object.entries(navSections).forEach(([key, section]) => {
+        if (!section || !navObserver) return;
+        section.dataset.navSection = key;
+        navObserver.observe(section);
+      });
+
+      const topbarMenu = document.querySelector('.topbar-menu');
+      const topbarToggle = topbarMenu?.querySelector('.topbar-menu-toggle');
+      const topbarDropdown = topbarMenu?.querySelector('.topbar-dropdown');
+      const closeTopbarMenu = () => {
+        if (!topbarMenu || !topbarToggle || !topbarDropdown) return;
+        topbarMenu.classList.remove('is-open');
+        topbarToggle.setAttribute('aria-expanded', 'false');
+        topbarDropdown.setAttribute('aria-hidden', 'true');
+      };
+      topbarToggle?.addEventListener('click', () => {
+        const willOpen = !topbarMenu.classList.contains('is-open');
+        topbarMenu.classList.toggle('is-open', willOpen);
+        topbarToggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        topbarDropdown.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+        if (willOpen) topbarDropdown.querySelector('[role="menuitem"]')?.focus();
+      });
+      topbarDropdown?.addEventListener('click', async (event) => {
+        const action = event.target.closest('[data-topbar-action]')?.dataset.topbarAction;
+        if (!action) return;
+        if (action === 'copy-link') copyText(window.location.href, '项目链接已复制');
+        if (action === 'save-copy') { saveVersion(); showToast('已保存一份当前项目副本'); }
+        if (action === 'archive') showToast('项目已标记为待归档');
+        closeTopbarMenu();
+      });
+      document.addEventListener('click', (event) => {
+        if (topbarMenu && !topbarMenu.contains(event.target)) closeTopbarMenu();
+        const picker = event.target.closest('[data-platform-picker]');
+        if (!picker) closePlatformPickers();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeTopbarMenu();
+        closePlatformPickers();
+        closeNavMenus();
+      });
+
+      const setStatus = (label, state = '') => {
+        statusPill.className = `status-pill${state ? ` ${state}` : ''}`;
+        statusPill.innerHTML = `<i></i>${label}`;
+      };
+
+      const requestAgent = async (task) => {
+        const selectedScene = sceneOptions.find((option) => option.classList.contains('selected'))?.textContent.trim() || '';
+        await ensureProjectOnServer();
+        const response = await fetch(`${projectApiUrl}/agent-runs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task,
+            scene: selectedScene,
+            note: agentNote,
+            product: productState
+          })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (payload.run) {
+          agentRunHistory = [payload.run, ...agentRunHistory.filter((run) => run.runId !== payload.run.runId)].slice(0, 50);
+          latestAgentDraftVersion = Math.max(latestAgentDraftVersion, Number(payload.run.output?.version) || 0);
+        }
+        if (!response.ok) throw new Error(payload.error || 'AI 服务暂时不可用');
+        if (!payload.run?.output) throw new Error('Agent 没有返回有效运行记录');
+        return { ...payload.run.output, run: payload.run };
+      };
+
+      const setAgentBusy = (busy) => {
+        agentBusy = busy;
+        nextButton.disabled = busy || interrupted;
+        nextButton.classList.toggle('is-loading', busy);
+        nextButton.innerHTML = busy
+          ? 'DeepSeek 整理中<span class="button-spinner" aria-hidden="true"></span>'
+          : (generated && !editingAgent ? '描述词 A 已生成<svg class="ui-icon"><use href="#i-check"></use></svg>' : `${generated ? '重新生成' : '生成'}描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg>`);
+      };
+
+      sceneOptions.forEach((option) => {
+        option.addEventListener('click', () => {
+          if (interrupted) return;
+          sceneOptions.forEach((item) => {
+            item.classList.toggle('selected', item === option);
+            item.setAttribute('aria-pressed', item === option ? 'true' : 'false');
+          });
+          setStatus('等待回答');
+          persistState();
+          showToast(`已选择「${option.textContent.trim()}」`);
+        });
+        option.setAttribute('aria-pressed', option.classList.contains('selected') ? 'true' : 'false');
+      });
+
+      interruptButton.addEventListener('click', () => {
+        interrupted = !interrupted;
+        interruptButton.classList.toggle('is-resume', interrupted);
+        interruptButton.innerHTML = `<span aria-hidden="true"></span>${interrupted ? '继续节点' : '中断节点'}`;
+        currentStep.classList.toggle('paused', interrupted);
+        nextButton.disabled = interrupted;
+        nextButton.setAttribute('aria-disabled', interrupted ? 'true' : 'false');
+        if (interrupted) {
+          setStatus('已中断', 'is-interrupted');
+          currentStepLabel.innerHTML = '<i></i>已中断';
+          showToast('节点已中断，当前内容会保留');
+        } else {
+          setStatus(generated ? '描述词 A 已生成' : '等待回答', generated ? 'is-ready' : '');
+          currentStepLabel.innerHTML = generated ? '已完成' : '<i></i>等待回答';
+          showToast('节点已继续');
+        }
+        persistState();
+      });
+
+      nextButton.addEventListener('click', () => {
+        if (interrupted || (generated && !editingAgent) || agentBusy) return;
+        const wasGenerated = generated;
+        setAgentBusy(true);
+        setStatus('正在请求 DeepSeek', 'is-ready');
+        requestAgent('description_a').then((payload) => {
+          const nextDescription = String(payload.descriptionA || '').trim();
+          if (!nextDescription) throw new Error('DeepSeek 没有返回描述词 A');
+          const descriptionChanged = wasGenerated && nextDescription !== descriptionA;
+          if (descriptionChanged && progress > 2) {
+            const accepted = window.confirm('新的描述词 A 与已确认版本不同。提示词 B 和已生成结果需要重做。是否清除下游内容并继续？');
+            if (!accepted) {
+              showToast('已保留原有描述词和后续内容');
+              return;
+            }
+            resetDownstream(1);
+          }
+          descriptionA = nextDescription;
+          descriptionAStructured = payload.descriptionAStructured && typeof payload.descriptionAStructured === 'object' ? payload.descriptionAStructured : {};
+          descriptionADraft = payload.draft && typeof payload.draft === 'object' ? payload.draft : null;
+          descriptionAFieldEdits = {};
+          currentAgentRunId = payload.run?.runId || currentAgentRunId;
+          currentAgentRunVersion = Number(payload.run?.version) || currentAgentRunVersion;
+          generated = true;
+          progress = Math.max(progress, 2);
+          editingAgent = false;
+          if (!wasGenerated || descriptionChanged) {
+            markStepComplete(1);
+            setCurrentStep(2, '确认创作简报');
+            unlockCard('a');
+            openDetail('a');
+          }
+          setStatus('描述词 A 已生成', 'is-ready');
+          nextButton.classList.add('is-complete');
+          nextButton.innerHTML = '描述词 A 已生成<svg class="ui-icon"><use href="#i-check"></use></svg>';
+          persistState();
+          syncProject();
+          showToast(descriptionChanged ? '描述词 A 已更新，下游内容需要重新确认' : 'DeepSeek 已生成描述词 A');
+        }).catch((error) => {
+          setStatus('AI 请求失败', 'is-interrupted');
+          showToast(error.message || 'DeepSeek 暂时不可用');
+        }).finally(() => {
+          if (!generated) {
+            setAgentBusy(false, '生成描述词 A');
+            nextButton.innerHTML = '生成描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg>';
+          }
+        });
+      });
+
+      saveButton.addEventListener('click', () => {
+        saveState.innerHTML = '<svg class="ui-icon"><use href="#i-check"></use></svg>刚刚保存';
+        saveState.classList.add('is-saved');
+        saveVersion();
+        persistState();
+        syncProject(true);
+        showToast('项目已保存到本地草稿');
+        window.setTimeout(() => {
+          saveState.innerHTML = '<svg class="ui-icon"><use href="#i-check"></use></svg>草稿已保存';
+          saveState.classList.remove('is-saved');
+        }, 3000);
+      });
+
+      document.querySelector('.reply-box button').addEventListener('click', () => {
+        if (interrupted || agentBusy) return;
+        const input = document.querySelector('.reply-box textarea');
+        agentNote = input.value.trim();
+        if (!agentNote) {
+          showToast('请先补充一点画面方向');
+          input.focus();
+          return;
+        }
+        const submitButton = document.querySelector('.reply-box button');
+        submitButton.disabled = true;
+        submitButton.classList.add('is-loading');
+        setStatus('正在请求 DeepSeek', 'is-ready');
+        requestAgent('follow_up').then((payload) => {
+          const reply = payload.reply || '已收到你的补充。';
+          const question = payload.followUpQuestion || '';
+          document.querySelector('.agent-greeting strong').textContent = reply;
+          document.querySelector('.agent-greeting p').textContent = question || '信息已经足够，可以生成第一版描述词。';
+          setStatus(question ? '等待补充' : '可以生成', 'is-ready');
+          persistState();
+          syncProject();
+          showToast(question || 'DeepSeek 已收到补充');
+        }).catch((error) => {
+          setStatus('AI 请求失败', 'is-interrupted');
+          showToast(error.message || 'DeepSeek 暂时不可用');
+        }).finally(() => {
+          submitButton.disabled = false;
+          submitButton.classList.remove('is-loading');
+        });
+      });
+
+      const flowSteps = [...document.querySelectorAll('.flow-step')];
+      const workflowCanvas = document.querySelector('#workflow-canvas');
+      const workflowNodes = [...workflowCanvas.querySelectorAll('[data-workflow-node]')];
+      const stepNodes = Object.fromEntries([...workflowCanvas.querySelectorAll('[data-step-name]')].map((node) => [node.dataset.stepName, node]));
+      const detailContents = Object.fromEntries([...workflowCanvas.querySelectorAll('[data-step-content]')].map((content) => [content.dataset.stepContent, content]));
+      const detailContent = detailContents.c;
+      const modal = document.querySelector('#app-modal');
+      const modalTitle = document.querySelector('#modal-title');
+      const modalBody = document.querySelector('#modal-body');
+      const openModal = (title, content, { wide = false } = {}) => {
+        modalTitle.textContent = title;
+        modalBody.innerHTML = content;
+        modal.classList.toggle('is-wide', wide);
+        if (typeof modal.showModal === 'function') modal.showModal();
+        else modal.setAttribute('open', '');
+      };
+      const closeModal = () => {
+        if (typeof modal.close === 'function') modal.close();
+        else modal.removeAttribute('open');
+        modal.classList.remove('is-wide');
+      };
+      const renderProduct = () => {
+        document.querySelector('.product-details h3').textContent = productState.name;
+        document.querySelector('#canvas-product-name').textContent = productState.name;
+        document.querySelectorAll('.product-subtitle').forEach((node) => { node.textContent = productState.subtitle; });
+        document.querySelector('.product-note p').textContent = `“${productState.description}”`;
+        document.querySelectorAll('.product-visual img, .inspector-asset img').forEach((image) => {
+          image.src = productState.imageUrl || './assets/pearl-necklace.svg';
+          image.alt = `${productState.name}商品图片`;
+        });
+      };
+      const renderProjectName = () => { document.querySelector('.breadcrumb strong').textContent = projectName; };
+      const openProductEditor = () => {
+        openModal('编辑商品资料', `<p class="modal-note">商品事实会作为后续描述词和提示词的基础。</p><label class="modal-field">商品名称<input id="product-name" value="${escapeHtml(productState.name)}"></label><label class="modal-field">一句话卖点<input id="product-subtitle" value="${escapeHtml(productState.subtitle)}"></label><label class="modal-field">商品描述<textarea id="product-description">${escapeHtml(productState.description)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
+      };
+      const saveProduct = () => {
+        const nextProduct = {
+          name: document.querySelector('#product-name')?.value.trim() || productState.name,
+          subtitle: document.querySelector('#product-subtitle')?.value.trim() || productState.subtitle,
+          description: document.querySelector('#product-description')?.value.trim() || productState.description,
+          imageUrl: productState.imageUrl
+        };
+        const productChanged = Object.keys(nextProduct).some((key) => nextProduct[key] !== productState[key]);
+        if (productChanged && progress > 1) {
+          const accepted = window.confirm('商品资料有变化，后续 Agent 回答、描述词、提示词和生成结果需要重做。是否清除下游进度并保存？');
+          if (!accepted) return;
+          resetDownstream(0);
+        }
+        productState = nextProduct;
+        renderProduct();
+        persistState();
+        syncProject();
+        closeModal();
+        showToast('商品资料已更新');
+      };
+      const saveVersion = () => {
+        versions.unshift({
+          timestamp: new Date().toLocaleString('zh-CN', { hour12: false }),
+          selectedScene: sceneOptions.find((option) => option.classList.contains('selected'))?.textContent.trim() || '',
+          progress,
+          descriptionA,
+          descriptionAStructured,
+          descriptionADraft,
+          descriptionAFieldEdits,
+          aReferenceImageUrl,
+          promptB,
+          resultGenerated,
+          resultSelected,
+          product: { ...productState }
+        });
+        versions = versions.slice(0, 8);
+        persistState();
+      };
+      const openVersionHistory = () => {
+        const items = versions.length ? versions.map((version, index) => `<li><div><strong>${version.timestamp}</strong><span>${version.product?.name || productState.name} · ${version.selectedScene || '未选择场景'}</span></div><button class="text-button" type="button" data-version-index="${index}">恢复</button></li>`).join('') : '<li class="empty-version">保存项目后，这里会出现可恢复的版本。</li>';
+        openModal('版本记录', `<p class="modal-note">版本会随当前项目状态保存；服务端不可用时仍保留本地草稿。</p><ul class="version-list">${items}</ul>`);
+      };
+      const openNewProject = () => {
+        openModal('新建项目', '<p class="modal-note">新项目会从空白的商品资料和第一步场景开始。</p><label class="modal-field">项目名称<input id="new-project-name" placeholder="例如：夏日新品系列"></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="create-project">创建项目</button></div>');
+      };
+      const createProject = async () => {
+        projectName = document.querySelector('#new-project-name')?.value.trim() || '未命名商品项目';
+        const projectSlug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'project';
+        projectId = `${projectSlug}-${Date.now().toString(36)}`;
+        projectApiUrl = `/api/projects/${encodeURIComponent(projectId)}`;
+        productState = { name: '新商品', subtitle: '等待补充商品卖点', description: '请补充商品描述和希望呈现的画面方向。' };
+        aReferenceImageUrl = '';
+        versions = [];
+        progress = 1;
+        generated = false;
+        interrupted = false;
+        descriptionA = '';
+        descriptionAStructured = {};
+        descriptionADraft = null;
+        descriptionAFieldEdits = {};
+        currentAgentRunId = '';
+        currentAgentRunVersion = 0;
+        agentRunHistory = [];
+        latestAgentDraftVersion = 0;
+        promptB = '';
+        resultGenerated = false;
+        resultSelected = -1;
+        generatedResults = [];
+        generationJobId = '';
+        selectedGenerationPlatforms = new Set(['doubao']);
+        doubaoBridgeState = 'idle';
+        Object.values(generationPlatforms).forEach((platform) => { platform.state = 'idle'; platform.message = ''; });
+        sceneOptions.forEach((option, index) => {
+          option.classList.toggle('selected', index === 0);
+          option.setAttribute('aria-pressed', index === 0 ? 'true' : 'false');
+        });
+        persistState();
+        await syncProject();
+        closeModal();
+        window.location.reload();
+      };
+      const defaultDescription = () => {
+        const scene = sceneOptions.find((option) => option.classList.contains('selected'))?.textContent.trim() || '自然窗边';
+        return `${productState.name}商品图，${scene}场景，浅色背景与柔和自然光，画面干净留白，突出${productState.subtitle}，保留商品结构与材质细节，整体自然、适合电商上新。`;
+      };
+      const defaultPrompt = () => `${descriptionA || defaultDescription()}\n\n构图：竖幅商品摄影，商品位于画面视觉中心，保留商品结构与关键细节。\n质感：真实材质、自然光线与细腻阴影。\n限制：不改变商品结构，不添加文字和水印。`;
+      const markStepComplete = (index) => {
+        const step = flowSteps[index];
+        if (!step) return;
+        step.classList.remove('current', 'paused');
+        step.classList.add('completed');
+        step.removeAttribute('aria-current');
+        step.querySelector('.step-number').innerHTML = '<svg class="ui-icon"><use href="#i-check"></use></svg>';
+        const label = step.querySelector('.step-text small');
+        if (label) label.textContent = '已完成';
+        const button = step.querySelector('.flow-step-button');
+        if (button) button.disabled = false;
+        updateNodeState(index, '已完成', 'is-complete');
+      };
+      const setCurrentStep = (index, label) => {
+        const step = flowSteps[index];
+        if (!step) return;
+        step.classList.add('current');
+        step.classList.remove('completed');
+        step.setAttribute('aria-current', 'step');
+        const small = step.querySelector('.step-text small');
+        if (small && label) small.innerHTML = `<i></i>${label}`;
+        const button = step.querySelector('.flow-step-button');
+        if (button) button.disabled = false;
+        updateNodeState(index, label || '进行中', 'is-current');
+      };
+      const updateNodeState = (index, label, stateClass) => {
+        const node = workflowNodes[index];
+        const state = node?.querySelector('.node-state');
+        if (!state) return;
+        state.classList.remove('is-current', 'is-complete', 'is-pending');
+        state.classList.add(stateClass);
+        state.innerHTML = stateClass === 'is-complete' ? '<svg class="ui-icon"><use href="#i-check"></use></svg>已完成' : `<i></i>${escapeHtml(label)}`;
+      };
+      const resetFlowStep = (index, label = '未开始') => {
+        const step = flowSteps[index];
+        const node = workflowNodes[index];
+        if (!step || !node) return;
+        step.classList.remove('current', 'completed', 'paused');
+        step.removeAttribute('aria-current');
+        const number = String(index + 1).padStart(2, '0');
+        step.querySelector('.step-number').textContent = number;
+        step.querySelector('.step-text small').textContent = label;
+        const button = step.querySelector('.flow-step-button');
+        if (button) button.disabled = true;
+        updateNodeState(index, label, 'is-pending');
+        if (index >= 2) {
+          const name = ['a', 'b', 'c'][index - 2];
+          if (name && progress < index + 1) {
+            node.classList.add('is-locked');
+            node.querySelector('[data-node-gate]')?.removeAttribute('hidden');
+            const editButton = node.querySelector('[data-node-open]');
+            if (editButton) editButton.disabled = true;
+            const detail = node.querySelector('[data-node-detail]');
+            if (detail) detail.hidden = true;
+          }
+        }
+      };
+      const unlockCard = (stepName) => {
+        const node = stepNodes[stepName];
+        if (!node) return;
+        node.classList.remove('is-locked');
+        node.querySelector('[data-node-gate]')?.setAttribute('hidden', '');
+        const editButton = node.querySelector('[data-node-open]');
+        if (editButton) editButton.disabled = false;
+      };
+      const resetDownstream = (stepIndex) => {
+        progress = stepIndex + 1;
+        if (stepIndex === 0) {
+          generated = false;
+          editingAgent = false;
+          interrupted = false;
+          agentNote = '';
+          currentAgentRunId = '';
+          currentAgentRunVersion = 0;
+          interruptButton.classList.remove('is-resume');
+          interruptButton.innerHTML = '<span aria-hidden="true"></span>中断节点';
+          nextButton.classList.remove('is-complete');
+          nextButton.disabled = false;
+          document.querySelector('.reply-box textarea').value = '';
+          document.querySelector('.agent-greeting strong').textContent = '已经有一个不错的开始。';
+          document.querySelector('.agent-greeting p').textContent = '商品资料已整理好，再补充一个画面方向，就可以生成第一版描述词。';
+          setStatus('等待回答');
+        }
+        if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; descriptionADraft = null; descriptionAFieldEdits = {}; }
+        if (stepIndex < 3) promptB = '';
+        if (stepIndex < 4) {
+          resultGenerated = false;
+          resultSelected = -1;
+          generatedResults = [];
+          if (generationJobId) invalidatedGenerationJobs.add(generationJobId);
+          generationJobId = '';
+          doubaoBridgeState = 'idle';
+          doubaoAttemptId += 1;
+          Object.values(generationPlatforms).forEach((platform) => { platform.state = 'idle'; platform.message = ''; });
+        }
+        for (let index = stepIndex + 1; index < flowSteps.length; index += 1) resetFlowStep(index);
+        if (stepIndex === 0) {
+          markStepComplete(0);
+          setCurrentStep(1, '等待回答');
+          setStatus('等待回答');
+          setAgentBusy(false);
+        }
+        if (workflowNodes[stepIndex + 1]) {
+          workflowNodes.slice(stepIndex + 1).forEach((node) => {
+            const name = node.dataset.stepName;
+            const nodeDetail = node.querySelector('[data-node-detail]');
+            if (nodeDetail) nodeDetail.hidden = true;
+            node.classList.remove('is-expanded');
+            if (name && stepNodes[name].classList.contains('is-locked')) updateNodeState(Number(node.dataset.workflowNode), '未开始', 'is-pending');
+          });
+        }
+        renderResults();
+        renderPlatformStatuses();
+      };
+      const closePlatformPickers = (except = null) => {
+        document.querySelectorAll('[data-platform-picker].is-open').forEach((picker) => {
+          if (picker === except) return;
+          picker.classList.remove('is-open');
+          picker.querySelector('[data-platform-picker-trigger]')?.setAttribute('aria-expanded', 'false');
+          picker.querySelector('[data-platform-picker-menu]')?.setAttribute('aria-hidden', 'true');
+        });
+      };
+      const syncPlatformPicker = () => {
+        const picker = detailContent?.querySelector('[data-platform-picker]');
+        if (!picker) return;
+        const selected = [...selectedGenerationPlatforms];
+        const labels = selected.map((key) => generationPlatforms[key]?.label).filter(Boolean);
+        const summary = picker.querySelector('[data-platform-picker-summary]');
+        if (summary) summary.textContent = labels.length ? `${labels.slice(0, 2).join('、')}${labels.length > 2 ? ' 等' : ''} · ${labels.length} 个平台` : '请选择平台';
+        picker.querySelectorAll('input[name="generation-platform"]').forEach((input) => {
+          const checked = selectedGenerationPlatforms.has(input.value);
+          input.checked = checked;
+          input.closest('.platform-option')?.classList.toggle('is-selected', checked);
+          input.closest('.platform-option')?.setAttribute('aria-selected', checked ? 'true' : 'false');
+        });
+      };
+      const revealDetail = (detail) => {
+        if (!detail) return;
+        detail.hidden = false;
+        detail.classList.remove('is-visible');
+        window.requestAnimationFrame(() => detail.classList.add('is-visible'));
+      };
+      const closeDetail = (stepName) => {
+        const node = stepNodes[stepName];
+        const detail = node?.querySelector('[data-node-detail]');
+        if (detail) {
+          detail.classList.remove('is-visible');
+          const hide = () => { detail.hidden = true; };
+          if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) hide();
+          else window.setTimeout(hide, 190);
+        }
+        node?.classList.remove('is-expanded');
+      };
+      const openDetail = (stepName, shouldScroll = true) => {
+        const node = stepNodes[stepName];
+        const host = detailContents[stepName];
+        if (!node || node.classList.contains('is-locked') || !host) {
+          showToast('请先完成前一个节点');
+          return;
+        }
+        const detail = node.querySelector('[data-node-detail]');
+        revealDetail(detail);
+        node.classList.add('is-expanded');
+        if (stepName === 'a') {
+          host.innerHTML = `<p>Agent 已经把商品事实和画面方向整理成一份简报，你可以在提交前调整文字。A 版可附加一张参考图；图片不会发送给文字 Agent，只会随确认后的创作输入保存并用于后续生图。</p>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA || defaultDescription())}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+        } else if (stepName === 'b') {
+          host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">提示词 B<textarea id="prompt-editor">${escapeHtml(promptB || defaultPrompt())}</textarea></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+        } else {
+          host.innerHTML = `<p class="generation-intro">选择一个或多个平台。每个平台独立检查登录和提交；单个平台失败不会影响其他平台。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '网页扩展' : '网页适配'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">不满意？重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          syncPlatformPicker();
+          renderPlatformStatuses();
+          if (resultGenerated) renderResults();
+        }
+        if (shouldScroll) {
+          const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+          node.scrollIntoView({ behavior: scrollBehavior, block: 'start' });
+        }
+      };
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+      const agentDraftFieldDefinitions = [
+        { key: 'productFactsSummary', label: '商品事实摘要', rows: 3 },
+        { key: 'scene', label: '场景', rows: 2 },
+        { key: 'composition', label: '构图', rows: 2 },
+        { key: 'lightingMood', label: '光线与氛围', rows: 2 },
+        { key: 'mustKeep', label: '必须保留', rows: 3, array: true },
+        { key: 'forbidden', label: '禁止出现', rows: 3, array: true }
+      ];
+      const getDraftField = (key) => {
+        const canonical = descriptionADraft?.fields?.[key];
+        if (canonical && typeof canonical === 'object' && Object.prototype.hasOwnProperty.call(canonical, 'value')) return canonical;
+        const legacyKey = key === 'productFactsSummary' ? 'productFactsSummary' : key;
+        const legacyValue = descriptionAStructured?.[legacyKey] ?? (key === 'productFactsSummary' ? descriptionAStructured?.subject : undefined);
+        return { value: legacyValue ?? (agentDraftFieldDefinitions.find((field) => field.key === key)?.array ? [] : ''), source: 'agent' };
+      };
+      const draftFieldText = (definition, value) => definition.array
+        ? (Array.isArray(value) ? value : [value]).map((item) => String(item ?? '')).filter(Boolean).join('\n')
+        : String(value ?? '');
+      const renderAgentDraftFields = () => `<section class="agent-draft-fields" aria-label="A 版结构化简报">${agentDraftFieldDefinitions.map((definition) => {
+        const field = getDraftField(definition.key);
+        const isEdited = Object.prototype.hasOwnProperty.call(descriptionAFieldEdits || {}, definition.key);
+        const value = isEdited ? descriptionAFieldEdits[definition.key] : field.value;
+        const source = isEdited ? '待保存修改' : field.source === 'user' ? '用户资料' : 'Agent 整理';
+        return `<label class="agent-draft-field"><span class="agent-draft-field-heading"><span>${definition.label}</span><small class="agent-field-source${isEdited ? ' is-unsaved' : ''}" data-agent-field-source="${definition.key}">${source}</small></span><textarea data-agent-field="${definition.key}" rows="${definition.rows}" aria-label="${definition.label}">${escapeHtml(draftFieldText(definition, value))}</textarea></label>`;
+      }).join('')}</section>`;
+      const parseDraftFieldInput = (definition, value) => definition.array
+        ? String(value ?? '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+        : String(value ?? '').trim();
+      const refreshDraftFieldSource = (key) => {
+        const badge = detailContent.querySelector(`[data-agent-field-source="${key}"]`);
+        if (!badge) return;
+        badge.textContent = '待保存修改';
+        badge.classList.add('is-unsaved');
+      };
+      const refreshSavedDraftFieldSources = () => {
+        for (const definition of agentDraftFieldDefinitions) {
+          const badge = detailContent.querySelector(`[data-agent-field-source="${definition.key}"]`);
+          if (!badge) continue;
+          const field = getDraftField(definition.key);
+          badge.textContent = field.source === 'user' ? '用户资料' : 'Agent 整理';
+          badge.classList.remove('is-unsaved');
+        }
+      };
+      const normalizeResultUrl = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        if (/^data:image\/(?:png|jpe?g|webp|gif);/i.test(raw)) return raw;
+        try {
+          const url = new URL(raw, window.location.href);
+          return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : '';
+        } catch { return ''; }
+      };
+      const normalizeResult = (result, platform, jobId = generationJobId) => {
+        if (!result || typeof result !== 'object') return null;
+        const url = normalizeResultUrl(result.url || result.imageUrl);
+        if (!url) return null;
+        return {
+          ...result,
+          id: String(result.id || url.slice(0, 120)),
+          url,
+          platform: platform || result.platform || 'doubao',
+          jobId: result.jobId || jobId || ''
+        };
+      };
+      const resultKey = (result) => `${result.platform || 'unknown'}|${result.jobId || ''}|${result.url}`;
+      const isCurrentResultMessage = (message) => !invalidatedGenerationJobs.has(message.jobId) && (!message.jobId || !generationJobId || message.jobId === generationJobId);
+      const mergePlatformResults = (platform, results, jobId = generationJobId) => {
+        const normalized = (Array.isArray(results) ? results : [])
+          .map((result) => normalizeResult(result, platform, jobId))
+          .filter(Boolean);
+        if (!normalized.length) return [];
+        const existingKeys = new Set(generatedResults.map((result) => resultKey(result)));
+        const selectedResult = resultSelected >= 0 ? generatedResults[resultSelected] : null;
+        const selectedKey = selectedResult ? resultKey(selectedResult) : '';
+        const retained = generatedResults.filter((result) => result.sourceUrl === 'manual-upload'
+          || result.platform !== platform
+          || (result.jobId && result.jobId === jobId));
+        const merged = new Map();
+        [...retained, ...normalized].forEach((result) => {
+          const key = resultKey(result);
+          merged.set(key, { ...merged.get(key), ...result });
+        });
+        generatedResults = [...merged.values()];
+        resultSelected = selectedKey ? generatedResults.findIndex((result) => resultKey(result) === selectedKey) : -1;
+        return normalized.filter((result) => !existingKeys.has(resultKey(result)));
+      };
+      const setResultAction = () => {
+        const action = detailContent.querySelector('[data-detail-action]');
+        if (!action || !generatedResults.length) return;
+        action.disabled = false;
+        action.dataset.detailAction = 'import';
+        action.innerHTML = '保存选中的结果<svg class="ui-icon"><use href="#i-box"></use></svg>';
+      };
+      const renderResults = () => {
+        const results = document.querySelector('#generation-results');
+        if (!results) return;
+        generatedResults = generatedResults.map((result) => normalizeResult(result, result?.platform)).filter(Boolean);
+        if (resultSelected >= generatedResults.length) resultSelected = -1;
+        if (!generatedResults.length) {
+          results.innerHTML = '<p class="generation-empty">还没有检测到结果图片。</p>';
+          return;
+        }
+        const platformCount = new Set(generatedResults.map((result) => result.platform)).size;
+        const previousActiveIndex = Number(results.dataset.activeIndex || 0);
+        const resultCards = generatedResults.map((result, index) => {
+          const label = result.sourceUrl === 'manual-upload' ? '手动导入' : (generationPlatforms[result.platform]?.label || result.platform || '平台');
+          return `<div class="generation-result${resultSelected === index ? ' selected' : ''}" data-result-platform="${escapeHtml(result.platform)}" role="listitem"><div class="generation-result-media"><img loading="lazy" decoding="async" src="${escapeHtml(result.url)}" alt="${escapeHtml(label)}生成结果 ${index + 1}"><span class="generation-result-platform">${escapeHtml(label)}</span><span class="generation-result-state">${result.saved ? '已归档' : '待选择'}</span><span class="generation-result-error" hidden>图片读取失败，请重新同步或手动导入</span></div><button type="button" data-result-index="${index}" aria-pressed="${resultSelected === index ? 'true' : 'false'}">${resultSelected === index ? '已选择' : '选择这张'}</button></div>`;
+        }).join('');
+        results.innerHTML = `<div class="generation-results-summary"><div class="generation-results-copy"><strong>已收到 ${generatedResults.length} 张结果</strong><span>来自 ${platformCount} 个平台，选择一张后归档</span></div><div class="generation-results-controls" aria-label="结果浏览"><button class="results-nav-button is-previous" type="button" data-results-step="-1" aria-label="上一张结果" aria-controls="generation-results-track"><svg class="ui-icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button><span class="generation-results-position" aria-live="polite"><span data-results-current>1</span> / ${generatedResults.length}</span><button class="results-nav-button" type="button" data-results-step="1" aria-label="下一张结果" aria-controls="generation-results-track"><svg class="ui-icon" aria-hidden="true"><use href="#i-arrow"></use></svg></button></div></div><div class="generation-results-track" id="generation-results-track" role="list" aria-label="生成结果候选" tabindex="0">${resultCards}</div>`;
+        const track = results.querySelector('#generation-results-track');
+        const cards = [...track.querySelectorAll('.generation-result')];
+        let positionFrame = 0;
+        const updatePosition = () => {
+          const trackBounds = track.getBoundingClientRect();
+          const trackCenter = trackBounds.left + track.clientLeft + track.clientWidth / 2;
+          const centers = cards.map((card) => {
+            const bounds = card.getBoundingClientRect();
+            return bounds.left + bounds.width / 2;
+          });
+          const activeIndex = centers.reduce((closestIndex, center, index) =>
+            Math.abs(center - trackCenter) < Math.abs(centers[closestIndex] - trackCenter) ? index : closestIndex, 0);
+          const maxScroll = track.scrollWidth - track.clientWidth;
+          results.dataset.activeIndex = String(activeIndex);
+          results.querySelector('[data-results-current]').textContent = String(activeIndex + 1);
+          results.querySelector('[data-results-step="-1"]').disabled = track.scrollLeft <= 1;
+          results.querySelector('[data-results-step="1"]').disabled = maxScroll <= 1 || track.scrollLeft >= maxScroll - 1;
+        };
+        track.addEventListener('scroll', () => {
+          if (positionFrame) return;
+          positionFrame = requestAnimationFrame(() => { positionFrame = 0; updatePosition(); });
+        }, { passive: true });
+        results.querySelectorAll('[data-results-step]').forEach((button) => button.addEventListener('click', () => {
+          const activeIndex = Number(results.dataset.activeIndex || 0);
+          const targetIndex = Math.max(0, Math.min(cards.length - 1, activeIndex + Number(button.dataset.resultsStep)));
+          const trackBounds = track.getBoundingClientRect();
+          const cardBounds = cards[targetIndex].getBoundingClientRect();
+          const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+          track.scrollTo({ left: track.scrollLeft + cardBounds.left - trackBounds.left, behavior });
+        }));
+        const restoredIndex = resultSelected >= 0 ? resultSelected : previousActiveIndex;
+        if (restoredIndex > 0 && cards[restoredIndex]) {
+          const trackBounds = track.getBoundingClientRect();
+          const cardBounds = cards[restoredIndex].getBoundingClientRect();
+          track.scrollLeft += cardBounds.left - trackBounds.left;
+        }
+        updatePosition();
+        results.querySelectorAll('.generation-result img').forEach((image) => image.addEventListener('error', () => {
+          const card = image.closest('.generation-result');
+          image.hidden = true;
+          card?.classList.add('is-broken');
+          const error = card?.querySelector('.generation-result-error');
+          if (error) error.hidden = false;
+        }, { once: true }));
+        results.querySelectorAll('[data-result-index]').forEach((button) => button.addEventListener('click', () => {
+          resultSelected = Number(button.dataset.resultIndex);
+          renderResults();
+          document.querySelector(`[data-result-index="${resultSelected}"]`)?.focus({ preventScroll: true });
+          persistState();
+          syncProject();
+        }));
+        setResultAction();
+      };
+      const renderPlatformStatuses = () => {
+        const list = document.querySelector('#platform-status-list');
+        const selected = [...selectedGenerationPlatforms];
+        if (list) list.innerHTML = selected.map((platform) => {
+          const item = generationPlatforms[platform];
+          return `<div class="platform-status-row" data-platform="${escapeHtml(platform)}"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.message || (item.state === 'idle' ? '等待发送' : item.state))}</span></div>`;
+        }).join('');
+        syncPlatformPicker();
+      };
+      const taskStatusLabels = {
+        queued: '排队中', running: '运行中', completed: '已完成', failed: '部分失败', cancelled: '已取消', expired: '已过期',
+        checking_login: '检查登录', page_opened: '页面已打开', filling: '填写中', submitted: '已提交', generating: '生成中',
+        result_ready: '结果待选', login_required: '需要登录', not_open: '页面未打开', upload_error: '上传失败', submit_error: '提交失败',
+        result_timeout: '结果超时', adapter_error: '适配失败', import_error: '归档失败'
+      };
+      const taskStatusLabel = (status) => taskStatusLabels[status] || status || '未知';
+      const taskTime = (value) => {
+        if (!value) return '暂无时间';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
+      };
+      const taskPlatformLabels = { doubao: '豆包', chatgpt: 'ChatGPT', gemini: 'Gemini', lovart: 'Lovart' };
+      const taskCenterMarkup = (jobs, selectedJobId = '') => {
+        if (!jobs.length) return '<div class="task-center-empty"><strong>还没有生成任务</strong><span>确认提示词 B 后，从多平台生成节点发起任务。</span></div>';
+        const selected = jobs.find((job) => job.jobId === selectedJobId) || jobs[0];
+        const rows = jobs.map((job) => {
+          const platforms = Object.entries(job.platforms || {}).map(([key, item]) => `<span class="task-platform-chip is-${escapeHtml(item.status || 'queued')}">${escapeHtml(taskPlatformLabels[key] || key)} · ${escapeHtml(taskStatusLabel(item.status))}</span>`).join('');
+          return `<button class="task-list-row${job.jobId === selected.jobId ? ' is-selected' : ''}" type="button" data-task-select="${escapeHtml(job.jobId)}"><span class="task-list-main"><strong>${escapeHtml(job.jobId)}</strong><small>${escapeHtml(taskTime(job.createdAt))}</small></span><span class="task-list-status is-${escapeHtml(job.status || 'queued')}">${escapeHtml(taskStatusLabel(job.status))}</span><span class="task-platform-chips">${platforms}</span></button>`;
+        }).join('');
+        const detailPlatforms = Object.entries(selected.platforms || {}).map(([key, item]) => {
+          const canRetry = !['completed', 'queued', 'checking_login', 'page_opened', 'filling', 'submitted', 'generating', 'running', 'result_ready'].includes(item.status);
+          const canCancel = !['completed', 'cancelled', 'expired'].includes(item.status);
+          const resultCount = (item.savedResults || []).length || (item.results || []).length;
+          return `<div class="task-detail-platform"><div class="task-detail-platform-head"><strong>${escapeHtml(taskPlatformLabels[key] || key)}</strong><span class="task-list-status is-${escapeHtml(item.status || 'queued')}">${escapeHtml(taskStatusLabel(item.status))}</span></div><p>${escapeHtml(item.errorMessage || item.message || '暂无错误信息')}</p><small>尝试 ${escapeHtml(String(item.attemptCount || 1))} · 更新于 ${escapeHtml(taskTime(item.updatedAt || item.lastAttemptAt))} · 结果 ${resultCount} 张</small><div class="task-detail-actions">${canRetry ? `<button class="text-button" type="button" data-task-action="retry" data-task-job="${escapeHtml(selected.jobId)}" data-task-platform="${escapeHtml(key)}">重试此平台</button>` : ''}${canCancel ? `<button class="text-button" type="button" data-task-action="cancel" data-task-job="${escapeHtml(selected.jobId)}" data-task-platform="${escapeHtml(key)}">取消</button>` : ''}</div></div>`;
+        }).join('');
+        const canCancelJob = !['completed', 'failed', 'cancelled', 'expired'].includes(selected.status);
+        return `<div class="task-center-layout"><div class="task-list" role="list" aria-label="生成任务列表">${rows}</div><section class="task-detail" aria-live="polite"><header class="task-detail-header"><div><span>任务详情</span><strong>${escapeHtml(selected.jobId)}</strong></div><span class="task-list-status is-${escapeHtml(selected.status || 'queued')}">${escapeHtml(taskStatusLabel(selected.status))}</span></header><p class="task-detail-prompt">${escapeHtml(String(selected.prompt || '').slice(0, 220))}</p><div class="task-detail-platforms">${detailPlatforms}</div><div class="task-detail-footer"><small>创建于 ${escapeHtml(taskTime(selected.createdAt))} · 最近更新 ${escapeHtml(taskTime(selected.updatedAt))}</small>${canCancelJob ? `<button class="button button-secondary" type="button" data-task-action="cancel-job" data-task-job="${escapeHtml(selected.jobId)}">取消整批任务</button>` : ''}</div></section></div>`;
+      };
+      const agentRunStatusLabels = { completed: '已完成', failed: '失败', waiting_user: '等待补充', running: '运行中', queued: '排队中', cancelled: '已取消' };
+      const agentRunTaskLabel = (task) => task === 'description_a' ? '描述词 A' : task === 'follow_up' ? '创作追问' : task || '未知任务';
+      const agentHistoryFieldLabels = { productFactsSummary: '商品事实摘要', scene: '场景', composition: '构图', lightingMood: '光线与氛围', mustKeep: '必须保留', forbidden: '禁止出现' };
+      const agentHistoryFieldValue = (field) => {
+        const value = field && typeof field === 'object' && Object.prototype.hasOwnProperty.call(field, 'value') ? field.value : field;
+        return Array.isArray(value) ? value.map((item) => String(item ?? '')).join('\n') : String(value ?? '');
+      };
+      const renderAgentHistoryPreview = (run) => {
+        if (!run) return '<div class="agent-history-empty"><strong>选择一条运行记录</strong><span>查看运行输入、A 版输出和修改修订。</span></div>';
+        const input = run.input || {};
+        const product = input.product || {};
+        const direction = input.creativeDirection || {};
+        const output = run.output || {};
+        const draft = output.draft;
+        const fields = draft?.fields && typeof draft.fields === 'object'
+          ? Object.entries(agentHistoryFieldLabels).filter(([key]) => draft.fields[key]).map(([key, label]) => {
+            const field = draft.fields[key];
+            const value = agentHistoryFieldValue(field);
+            return `<div class="agent-history-field"><dt>${label}<small>${field.source === 'user' ? '用户' : 'Agent'}</small></dt><dd>${escapeHtml(value || '未填写').replace(/\n/g, '<br>')}</dd></div>`;
+          }).join('')
+          : '';
+        const warnings = Array.isArray(output.warnings) && output.warnings.length
+          ? `<section class="agent-history-section"><h4>提示</h4><ul>${output.warnings.map((warning) => `<li>${escapeHtml(warning.message || warning.code || '需要检查')}</li>`).join('')}</ul></section>`
+          : '';
+        const revisions = Array.isArray(run.revisions) && run.revisions.length
+          ? `<section class="agent-history-section"><h4>先前修订</h4><ol class="agent-history-revisions">${run.revisions.slice().reverse().map((revision) => `<li><span>版本 ${escapeHtml(String(revision.version || ''))} · ${escapeHtml(taskTime(revision.archivedAt))}</span><p>${escapeHtml(revision.output?.draft?.rawText || revision.output?.descriptionA || '该修订没有 A 版文本')}</p></li>`).join('')}</ol></section>`
+          : '';
+        const status = agentRunStatusLabels[run.status] || run.status || '未知状态';
+        return `<article class="agent-history-preview"><header class="agent-history-preview-heading"><div><span>${escapeHtml(agentRunTaskLabel(run.task))} · ${escapeHtml(taskTime(run.createdAt))}</span><h3>${run.version ? `版本 ${escapeHtml(String(run.version))}` : escapeHtml(status)}</h3></div><span class="task-list-status is-${escapeHtml(run.status || 'queued')}">${escapeHtml(status)}</span></header><div class="agent-history-badges"><span>${run.accepted ? '已接受' : '未接受'}</span>${run.restoredFromRunId ? `<span>恢复自 ${escapeHtml(run.restoredFromRunId)}</span>` : ''}<span>${escapeHtml(run.runId)}</span></div>${run.errorMessage ? `<section class="agent-history-section is-error"><h4>${escapeHtml(run.errorCode || '运行错误')}</h4><p>${escapeHtml(run.errorMessage)}</p></section>` : ''}<section class="agent-history-section"><h4>运行输入</h4><dl class="agent-history-input"><div><dt>商品</dt><dd>${escapeHtml(product.name || '未填写')}${product.subtitle ? ` · ${escapeHtml(product.subtitle)}` : ''}</dd></div><div><dt>商品描述</dt><dd>${escapeHtml(product.description || '未填写')}</dd></div><div><dt>场景</dt><dd>${escapeHtml(direction.scene || '未填写')}</dd></div><div><dt>创作方向</dt><dd>${escapeHtml(direction.note || '未填写')}</dd></div>${product.facts && Object.keys(product.facts).length ? `<div><dt>商品事实</dt><dd>${escapeHtml(JSON.stringify(product.facts))}</dd></div>` : ''}</dl></section>${output.reply ? `<section class="agent-history-section"><h4>Agent 回复</h4><p>${escapeHtml(output.reply)}</p>${output.followUpQuestion ? `<p>${escapeHtml(output.followUpQuestion)}</p>` : ''}</section>` : ''}${draft ? `<section class="agent-history-section"><h4>A 版原文</h4><pre class="agent-history-raw">${escapeHtml(draft.rawText || '')}</pre>${fields ? `<h4>结构化字段</h4><dl class="agent-history-fields">${fields}</dl>` : ''}</section>` : ''}${warnings}${revisions}</article>`;
+      };
+      const agentHistoryMarkup = (runs, selectedRunId, notice = '') => {
+        if (!runs.length) return `${notice ? `<p class="agent-history-notice">${escapeHtml(notice)}</p>` : ''}<div class="agent-history-empty"><strong>还没有 Agent 运行记录</strong><span>生成或追问后，历史记录会出现在这里。</span></div><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">关闭</button></div>`;
+        const selected = runs.find((run) => run.runId === selectedRunId) || runs[0];
+        const rows = runs.map((run) => {
+          const status = agentRunStatusLabels[run.status] || run.status || '未知状态';
+          const summary = run.output?.draft?.rawText || run.errorMessage || run.output?.reply || '';
+          return `<button class="agent-history-row${run.runId === selected.runId ? ' is-selected' : ''}" type="button" data-agent-run-select="${escapeHtml(run.runId)}"><span class="agent-history-row-main"><strong>${escapeHtml(agentRunTaskLabel(run.task))}${run.version ? ` · v${escapeHtml(String(run.version))}` : ''}</strong><small>${escapeHtml(taskTime(run.createdAt))}</small><small class="agent-history-summary">${escapeHtml(summary || run.runId)}</small></span><span class="task-list-status is-${escapeHtml(run.status || 'queued')}">${escapeHtml(status)}</span>${run.accepted ? '<span class="agent-history-accepted">已接受</span>' : ''}</button>`;
+        }).join('');
+        const canRestore = selected.task === 'description_a' && selected.status === 'completed' && Boolean(selected.output?.draft);
+        return `${notice ? `<p class="agent-history-notice">${escapeHtml(notice)}</p>` : ''}<div class="agent-history-layout"><div class="agent-history-list" role="list" aria-label="Agent 运行列表">${rows}</div><div class="agent-history-detail">${renderAgentHistoryPreview(selected)}</div></div><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">关闭</button><button class="button button-primary" type="button" data-agent-run-restore="${escapeHtml(selected.runId)}" ${canRestore ? '' : 'disabled'}>恢复为新草稿</button></div>`;
+      };
+      const openAgentHistory = async () => {
+        modal.classList.add('is-wide');
+        openModal('Agent 运行历史', '<div class="agent-history-empty"><strong>正在读取运行记录</strong></div>', { wide: true });
+        let notice = '';
+        try {
+          const response = await fetch(`${projectApiUrl}/agent-runs`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '运行记录读取失败');
+          agentRunHistory = Array.isArray(payload.runs) ? payload.runs : [];
+          latestAgentDraftVersion = Number(payload.latestDraftVersion) || latestAgentDraftVersion;
+        } catch (error) {
+          notice = `服务端历史暂不可用，显示已载入记录。${error.message || ''}`;
+        }
+        if (!agentRunHistory.some((run) => run.runId === selectedAgentHistoryRunId)) {
+          selectedAgentHistoryRunId = agentRunHistory.find((run) => run.runId === currentAgentRunId)?.runId || agentRunHistory[0]?.runId || '';
+        }
+        modalBody.innerHTML = agentHistoryMarkup(agentRunHistory, selectedAgentHistoryRunId, notice);
+      };
+      const selectAgentHistoryRun = async (runId) => {
+        selectedAgentHistoryRunId = runId;
+        const response = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(runId)}`, { cache: 'no-store' }).catch(() => null);
+        if (response?.ok) {
+          const payload = await response.json().catch(() => ({}));
+          if (payload.run) agentRunHistory = [payload.run, ...agentRunHistory.filter((run) => run.runId !== runId)];
+        }
+        modalBody.innerHTML = agentHistoryMarkup(agentRunHistory, selectedAgentHistoryRunId);
+      };
+      const restoreAgentRun = async (runId) => {
+        const restoreButton = modalBody.querySelector(`[data-agent-run-restore="${CSS.escape(runId)}"]`);
+        const sourceRun = agentRunHistory.find((run) => run.runId === runId);
+        if (!sourceRun || sourceRun.task !== 'description_a' || sourceRun.status !== 'completed' || !sourceRun.output?.draft) return;
+        if ((progress > 2 || descriptionA) && !window.confirm('恢复会新建一个 A 版草稿，并清除当前 A 版之后的提示词和生成结果。原历史记录会保留。是否继续？')) return;
+        if (restoreButton) { restoreButton.disabled = true; restoreButton.textContent = '正在恢复'; }
+        try {
+          await ensureProjectOnServer();
+          const response = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.run) throw new Error(payload.error || '历史草稿恢复失败');
+          const restoredRun = payload.run;
+          if (progress > 2) resetDownstream(1);
+          agentRunHistory = [restoredRun, ...agentRunHistory.filter((run) => run.runId !== restoredRun.runId)].slice(0, 50);
+          currentAgentRunId = restoredRun.runId;
+          currentAgentRunVersion = Number(restoredRun.version) || 0;
+          latestAgentDraftVersion = Math.max(latestAgentDraftVersion, currentAgentRunVersion);
+          descriptionA = restoredRun.output.draft.rawText || '';
+          descriptionADraft = restoredRun.output.draft;
+          descriptionAStructured = restoredRun.output.descriptionAStructured || {};
+          descriptionAFieldEdits = {};
+          generated = true;
+          editingAgent = false;
+          progress = 2;
+          setAgentBusy(false);
+          markStepComplete(1);
+          setCurrentStep(2, '确认创作简报');
+          unlockCard('a');
+          setStatus('恢复的 A 版待确认', 'is-ready');
+          nextButton.classList.add('is-complete');
+          persistState();
+          await syncProject();
+          closeModal();
+          openDetail('a');
+          showToast('已恢复为新草稿，原历史记录保留');
+        } catch (error) {
+          if (restoreButton?.isConnected) { restoreButton.disabled = false; restoreButton.textContent = '恢复为新草稿'; }
+          showToast(error.message || '历史草稿恢复失败');
+        }
+      };
+      const openTaskCenter = async (selectedJobId = generationJobId) => {
+        openModal('任务中心', '<div class="task-center-loading">正在读取任务记录…</div>');
+        try {
+          const response = await fetch(`${projectApiUrl}/generation-jobs`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '任务记录读取失败');
+          const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+          modalBody.innerHTML = taskCenterMarkup(jobs, selectedJobId);
+        } catch (error) {
+          modalBody.innerHTML = `<div class="task-center-empty"><strong>任务记录读取失败</strong><span>${escapeHtml(error.message || '服务端暂不可用')}</span><button class="button button-secondary" type="button" data-task-action="refresh">重试读取</button></div>`;
+        }
+      };
+      const hydrateGenerationJob = (job) => {
+        if (!job || job.jobId !== generationJobId) return;
+        Object.entries(job.platforms || {}).forEach(([key, item]) => {
+          if (!generationPlatforms[key]) return;
+          generationPlatforms[key].state = item.status || 'idle';
+          generationPlatforms[key].message = item.errorMessage || item.message || '';
+          if (Array.isArray(item.results) && item.results.length) mergePlatformResults(key, item.results, job.jobId);
+        });
+        renderPlatformStatuses();
+        renderResults();
+        persistState();
+      };
+      const handleTaskAction = async (action, jobId, platform = '') => {
+        if (action === 'refresh') { openTaskCenter(jobId); return; }
+        const endpoint = platform
+          ? `${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}/platforms/${encodeURIComponent(platform)}/${action}`
+          : `${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}/${action === 'cancel-job' ? 'cancel' : action}`;
+        try {
+          const response = await fetch(endpoint, { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '任务操作失败');
+          if (payload.job) {
+            hydrateGenerationJob(payload.job);
+            if (action === 'cancel' && platform) {
+              window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_CANCEL', platform, jobId, attemptId: payload.job.platforms?.[platform]?.attemptId || '' }, '*');
+            }
+            if (action === 'cancel-job') {
+              Object.keys(payload.job.platforms || {}).forEach((platformName) => {
+                window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_CANCEL', platform: platformName, jobId, attemptId: payload.job.platforms?.[platformName]?.attemptId || '' }, '*');
+              });
+            }
+            if (action === 'retry' && payload.job.platforms?.[platform]) {
+              const entry = payload.job.platforms[platform];
+              const retryImageUrl = aReferenceImageUrl || productState.imageUrl;
+              window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...entry, platform, jobId, projectId, prompt: payload.job.prompt || promptB, ...(retryImageUrl && !isExampleProductImage(retryImageUrl) ? { imageUrl: retryImageUrl, imageUrlAbsolute: new URL(retryImageUrl, window.location.href).href } : {}), workbenchOrigin: window.location.origin } }, '*');
+            }
+          }
+          showToast(action === 'retry' ? `${taskPlatformLabels[platform] || platform} 已重新排队` : '任务状态已更新');
+          openTaskCenter(jobId);
+        } catch (error) { showToast(error.message || '任务操作失败'); }
+      };
+      const collectAgentDraftPatch = () => {
+        const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
+        const baseDraft = run?.output?.draft || descriptionADraft || {};
+        const nextDescription = document.querySelector('#description-editor')?.value.trim() || defaultDescription();
+        const patch = {};
+        if (nextDescription !== String(baseDraft.rawText || descriptionA || '').trim()) patch.rawText = nextDescription;
+        const fields = {};
+        for (const definition of agentDraftFieldDefinitions) {
+          const input = detailContent.querySelector(`[data-agent-field="${definition.key}"]`);
+          if (!input) continue;
+          const nextValue = parseDraftFieldInput(definition, input.value);
+          const storedField = baseDraft.fields?.[definition.key] || getDraftField(definition.key);
+          const storedValue = storedField && typeof storedField === 'object' && Object.prototype.hasOwnProperty.call(storedField, 'value')
+            ? storedField.value
+            : storedField;
+          const currentValue = definition.array
+            ? (Array.isArray(storedValue) ? storedValue : String(storedValue ?? '').split(/[，,；;]/).map((item) => item.trim()).filter(Boolean))
+            : String(storedValue ?? '').trim();
+          if (JSON.stringify(nextValue) !== JSON.stringify(currentValue)) fields[definition.key] = nextValue;
+        }
+        if (Object.keys(fields).length) patch.fields = fields;
+        return { run, nextDescription, patch, changed: Boolean(patch.rawText !== undefined || patch.fields) };
+      };
+      const saveAgentDraftEdits = async ({ showFeedback = true } = {}) => {
+        const { run, nextDescription, patch, changed } = collectAgentDraftPatch();
+        if (!changed) {
+          descriptionAFieldEdits = {};
+          refreshSavedDraftFieldSources();
+          persistState();
+          if (showFeedback) showToast('简报没有新的修改');
+          return { changed: false };
+        }
+        if (currentAgentRunId) {
+          const response = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(currentAgentRunId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ draft: patch })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.run) throw new Error(payload.error || '简报修改保存失败');
+          const savedRun = payload.run;
+          agentRunHistory = [savedRun, ...agentRunHistory.filter((item) => item.runId !== savedRun.runId)].slice(0, 50);
+          descriptionA = savedRun.output?.draft?.rawText || nextDescription;
+          descriptionADraft = savedRun.output?.draft || descriptionADraft;
+          descriptionAStructured = savedRun.output?.descriptionAStructured || descriptionAStructured;
+          currentAgentRunVersion = Number(savedRun.version) || currentAgentRunVersion;
+        } else {
+          const timestamp = new Date().toISOString();
+          const nextVersion = Math.max(1, Number(descriptionADraft?.fields?.scene?.version) || 1) + 1;
+          const fields = Object.fromEntries(agentDraftFieldDefinitions.map((definition) => {
+            const prior = getDraftField(definition.key);
+            const priorValue = prior && typeof prior === 'object' && Object.prototype.hasOwnProperty.call(prior, 'value') ? prior.value : prior;
+            const value = patch.fields && Object.prototype.hasOwnProperty.call(patch.fields, definition.key) ? patch.fields[definition.key] : priorValue;
+            const source = patch.fields && Object.prototype.hasOwnProperty.call(patch.fields, definition.key) ? 'user' : prior?.source || 'agent';
+            return [definition.key, { value: value ?? (definition.array ? [] : ''), source, updatedAt: timestamp, version: nextVersion }];
+          }));
+          descriptionA = nextDescription;
+          descriptionADraft = { schemaVersion: 1, rawText: nextDescription, fields, userFacts: descriptionADraft?.userFacts || {} };
+          descriptionAStructured = {
+            subject: fields.productFactsSummary.value,
+            productFactsSummary: fields.productFactsSummary.value,
+            scene: fields.scene.value,
+            composition: fields.composition.value,
+            lightingMood: fields.lightingMood.value,
+            mustKeep: fields.mustKeep.value,
+            forbidden: fields.forbidden.value
+          };
+        }
+        descriptionAFieldEdits = {};
+        refreshSavedDraftFieldSources();
+        persistState();
+        await syncProject();
+        if (showFeedback) showToast('简报修改已保存');
+        return { changed: true, run };
+      };
+      const confirmDescription = async () => {
+        const { nextDescription, changed } = collectAgentDraftPatch();
+        if (changed && progress > 3) {
+          const accepted = window.confirm('A 版简报已修改。提示词 B 和已生成结果需要重做。是否清除这些下游内容并继续？');
+          if (!accepted) return;
+          resetDownstream(2);
+        }
+        const confirmButton = detailContent.querySelector('[data-detail-action="confirm-a"]');
+        if (!currentAgentRunId) {
+          try {
+            await saveAgentDraftEdits({ showFeedback: false });
+          } catch (error) {
+            showToast(error.message || '简报修改保存失败');
+            return;
+          }
+        }
+        if (currentAgentRunId) {
+          if (confirmButton) confirmButton.disabled = true;
+          try {
+            await saveAgentDraftEdits({ showFeedback: false });
+            const acceptResponse = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(currentAgentRunId)}/accept`, { method: 'POST' });
+            const acceptPayload = await acceptResponse.json().catch(() => ({}));
+            if (!acceptResponse.ok || !acceptPayload.run) throw new Error(acceptPayload.error || 'A 版确认失败');
+            agentRunHistory = [acceptPayload.run, ...agentRunHistory.filter((item) => item.runId !== acceptPayload.run.runId)].slice(0, 50);
+            currentAgentRunVersion = Number(acceptPayload.run.version) || currentAgentRunVersion;
+            descriptionAStructured = acceptPayload.run.output?.descriptionAStructured || descriptionAStructured;
+            descriptionADraft = acceptPayload.run.output?.draft || descriptionADraft;
+          } catch (error) {
+            showToast(error.message || 'A 版确认失败，请重试');
+            if (confirmButton) confirmButton.disabled = false;
+            return;
+          }
+        }
+        descriptionA = nextDescription;
+        progress = Math.max(progress, 3);
+        markStepComplete(2);
+        setCurrentStep(3, '等待确认');
+        unlockCard('b');
+        setStatus('提示词 B 待确认', 'is-ready');
+        persistState();
+        syncProject();
+        openDetail('b');
+        showToast('描述词 A 已确认，提示词 B 已解锁');
+      };
+      const confirmPrompt = () => {
+        const nextPrompt = document.querySelector('#prompt-editor')?.value.trim() || defaultPrompt();
+        const changed = Boolean(promptB && nextPrompt !== promptB);
+        if (changed && progress > 4) {
+          const accepted = window.confirm('提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
+          if (!accepted) return;
+          resetDownstream(3);
+        }
+        promptB = nextPrompt;
+        progress = Math.max(progress, 4);
+        markStepComplete(3);
+        setCurrentStep(4, '等待生成');
+        unlockCard('c');
+        setStatus('可在所选平台生成', 'is-ready');
+        persistState();
+        syncProject();
+        openDetail('c');
+        showToast('提示词 B 已确认，多平台生成已解锁');
+      };
+      const regenerateDescriptionA = () => {
+        editingAgent = true;
+        nextButton.disabled = false;
+        nextButton.click();
+      };
+      const resendPromptB = () => {
+        const nextPrompt = document.querySelector('#prompt-editor')?.value.trim() || defaultPrompt();
+        if (!nextPrompt) { showToast('请先填写提示词 B'); return; }
+        const changed = Boolean(promptB && nextPrompt !== promptB);
+        if (changed && progress > 4) {
+          const accepted = window.confirm('重新发送前会清除当前生成结果，但会保留旧任务记录。是否继续？');
+          if (!accepted) return;
+        }
+        if (changed) resetDownstream(3);
+        promptB = nextPrompt;
+        progress = Math.max(progress, 4);
+        markStepComplete(3);
+        setCurrentStep(4, '等待生成');
+        unlockCard('c');
+        persistState();
+        syncProject();
+        openDetail('c');
+        window.setTimeout(() => generateResults(), 0);
+      };
+      const resendGeneration = () => {
+        if (!selectedGenerationPlatforms.size) { showToast('请先选择至少一个生图平台'); return; }
+        if (generationJobId) invalidatedGenerationJobs.add(generationJobId);
+        generationResendSourceJobId = generationJobId;
+        generatedResults = [];
+        resultGenerated = false;
+        resultSelected = -1;
+        generationJobId = '';
+        doubaoBridgeState = 'idle';
+        persistState();
+        renderResults();
+        generateResults();
+      };
+      const generateResults = async () => {
+        if (agentBusy || interrupted) return;
+        const attemptId = ++doubaoAttemptId;
+        const platforms = [...selectedGenerationPlatforms];
+        if (!platforms.length) { showToast('请至少选择一个生图平台'); return; }
+        const sourceImageUrl = aReferenceImageUrl || productState.imageUrl;
+        const imageUrlAbsolute = sourceImageUrl && !isExampleProductImage(sourceImageUrl) ? new URL(sourceImageUrl, window.location.href).href : '';
+        generatedResults = [];
+        resultGenerated = false;
+        resultSelected = -1;
+        generationJobId = '';
+        renderResults();
+        persistState();
+        const action = detailContent.querySelector('[data-detail-action]');
+        doubaoBridgeState = 'preparing';
+        const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
+        platforms.forEach((platform) => { generationPlatforms[platform].state = 'queued'; generationPlatforms[platform].message = '等待平台响应'; });
+        renderPlatformStatuses();
+        if (bridgeStatus) bridgeStatus.textContent = '正在分别连接所选平台…';
+        if (action) { action.disabled = true; action.textContent = '正在发送到所选平台'; action.insertAdjacentHTML('beforeend', '<span class="button-spinner" aria-hidden="true"></span>'); }
+        try {
+          const response = await fetch(`${projectApiUrl}/generation-jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platforms, prompt: promptB, ...(imageUrlAbsolute ? { productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
+          generationJobId = payload.job.jobId;
+          generationResendSourceJobId = '';
+          persistState();
+          platforms.forEach((platform) => {
+            window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
+          });
+        } catch (error) {
+          doubaoBridgeState = 'error';
+          if (bridgeStatus) bridgeStatus.textContent = error.message || '无法创建生图任务。';
+          if (action) { action.disabled = false; action.textContent = '重试生成'; }
+          showToast(error.message || '无法创建生图任务');
+          return;
+        }
+        window.setTimeout(() => {
+          if (attemptId !== doubaoAttemptId) return;
+          if (!platforms.some((platform) => ['queued', 'preparing', 'checking_login', 'filling'].includes(generationPlatforms[platform].state))) return;
+          if (!doubaoExtensionReady) {
+            doubaoBridgeState = 'missing';
+            if (bridgeStatus) bridgeStatus.textContent = '工作台未检测到扩展。请在扩展管理页启用并重新加载扩展，再刷新工作台。';
+            if (action) { action.disabled = false; action.textContent = '重新连接豆包'; action.insertAdjacentHTML('beforeend', '<svg class="ui-icon"><use href="#i-external"></use></svg>'); }
+            showToast('工作台未检测到浏览器扩展');
+          } else {
+            doubaoBridgeState = 'error';
+            platforms.filter((platform) => ['queued', 'preparing'].includes(generationPlatforms[platform].state)).forEach((platform) => {
+              generationPlatforms[platform].state = 'not_open';
+              generationPlatforms[platform].message = '页面未响应，请打开并刷新该平台后重试';
+              syncGenerationStatus('not_open', generationPlatforms[platform].message, undefined, platform);
+            });
+            renderPlatformStatuses();
+            if (bridgeStatus) bridgeStatus.textContent = '部分平台页面未响应；已开始的平台会继续运行。';
+            if (action) { action.disabled = false; action.textContent = '重试生成'; }
+            showToast('未响应的平台已单独标记，其他平台继续运行');
+          }
+        }, 20000);
+      };
+      const copyText = async (value, successMessage) => {
+        if (!value) { showToast('当前没有可复制的内容'); return; }
+        try {
+          await navigator.clipboard.writeText(value);
+          showToast(successMessage);
+        } catch (error) {
+          const helper = document.createElement('textarea');
+          helper.value = value;
+          helper.style.position = 'fixed';
+          helper.style.opacity = '0';
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand('copy');
+          helper.remove();
+          showToast(successMessage);
+        }
+      };
+      const uploadGeneratedResults = async (files) => {
+        const selectedFiles = [...(files || [])].filter((file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)).slice(0, 4);
+        if (!selectedFiles.length) { showToast('请选择 PNG、JPEG 或 WebP 结果图片'); return; }
+        doubaoBridgeState = 'importing';
+        const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
+        if (bridgeStatus) bridgeStatus.textContent = `正在保存 ${selectedFiles.length} 张结果图片…`;
+        try {
+          const uploaded = [];
+          for (const file of selectedFiles) {
+            if (file.size > 8 * 1024 * 1024) throw new Error('单张结果图片不能超过 8MB');
+            const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.url) throw new Error(payload.error || '结果图片保存失败');
+            uploaded.push({ url: new URL(payload.url, window.location.href).href, sourceUrl: 'manual-upload' });
+          }
+          generatedResults = [
+            ...generatedResults.filter((result) => result.sourceUrl !== 'manual-upload'),
+            ...uploaded.map((result) => ({ ...result, platform: 'doubao', jobId: generationJobId }))
+          ];
+          resultGenerated = true;
+          resultSelected = -1;
+          doubaoBridgeState = 'result';
+          persistState();
+          syncProject();
+          renderResults();
+          if (bridgeStatus) bridgeStatus.textContent = `已保存 ${uploaded.length} 张结果，请选择后导入。`;
+          showToast(`已导入 ${uploaded.length} 张结果图片`);
+        } catch (error) {
+          doubaoBridgeState = 'import_error';
+          if (bridgeStatus) bridgeStatus.textContent = error.message || '结果图片保存失败';
+          showToast(error.message || '结果图片保存失败');
+        }
+      };
+      const openDoubaoHelp = () => {
+        openModal('扩展与手动操作', `<p class="modal-note">任务会复用已打开的平台页面，逐个平台检查登录后自动填入并提交生成。未打开目标平台时，请使用“打开所选平台”并登录，再回工作台发起任务。</p><ol class="help-list"><li>在 Edge 或 Chrome 打开扩展管理页，加载项目中的 <code>doubao-extension/</code> 文件夹。</li><li>先打开并登录要使用的生图平台；工作台不会在任务开始时自动创建标签页。</li><li>回到工作台启动生成，结果会自动同步到此处供你选择。</li><li>若自动操作失败，可以手动填写、生成并导入结果图片。</li></ol><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">关闭</button><button class="button button-primary" type="button" data-modal-action="copy-prompt">复制提示词 B</button></div>`);
+      };
+      const completeSelectedImport = async (result) => {
+        if (resultSelected < 0 || !result) return;
+        const selectedKey = resultKey(result);
+        if (result?.imageDataUrl) {
+          const imageResponse = await fetch(result.imageDataUrl);
+          const imageBlob = await imageResponse.blob();
+          const contentType = result.imageMimeType || imageBlob.type || 'image/png';
+          const upload = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': contentType }, body: imageBlob });
+          const uploaded = await upload.json().catch(() => ({}));
+          if (!upload.ok || !uploaded.url) throw new Error(uploaded.error || '结果图片保存失败。');
+          result = { ...result, url: new URL(uploaded.url, window.location.href).href, saved: true };
+          delete result.imageDataUrl;
+          delete result.imageMimeType;
+        }
+        if (generationJobId && !result?.jobRecorded) {
+          const record = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/results`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platform: result.platform || 'doubao', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname })
+          });
+          const payload = await record.json().catch(() => ({}));
+          if (!record.ok) throw new Error(payload.error || '结果记录保存失败。');
+          result.jobRecorded = true;
+        }
+        const selectedIndex = generatedResults.findIndex((item) => resultKey(item) === selectedKey);
+        if (selectedIndex < 0) throw new Error('结果已更新，请重新选择要归档的图片。');
+        resultSelected = selectedIndex;
+        generatedResults[selectedIndex] = result;
+        progress = 5;
+        markStepComplete(4);
+        setStatus('结果已归档', 'is-ready');
+        persistState();
+        syncProject();
+        renderResults();
+        const action = detailContent.querySelector('[data-detail-action="import"]');
+        if (action) action.textContent = '已归档到项目';
+        showToast('选中的图片已归档到项目');
+      };
+      const syncGenerationStatus = (status, message, results, platform = 'doubao', meta = {}) => {
+        if (!generationJobId) return;
+        const resultRefs = Array.isArray(results)
+          ? results.map((result) => ({ id: result.id, url: /^https?:\/\//.test(result.url || '') ? result.url : '' })).filter((result) => result.url)
+          : undefined;
+        fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/platforms/${encodeURIComponent(platform)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, message, ...(meta.attemptId ? { attemptId: meta.attemptId } : {}), ...(meta.errorCode ? { errorCode: meta.errorCode, errorMessage: message } : {}), ...(resultRefs?.length ? { results: resultRefs } : {}) })
+        }).catch(() => {});
+      };
+      const importResult = () => {
+        if (resultSelected < 0) {
+          showToast('请先选择一张结果');
+          return;
+        }
+        const result = generatedResults[resultSelected];
+        if (result?.sourceUrl === 'manual-upload' || result?.saved) {
+          completeSelectedImport(result);
+          return;
+        }
+        const action = detailContent.querySelector('[data-detail-action="import"]');
+        if (action) { action.disabled = true; action.textContent = '正在归档'; }
+          window.postMessage({ source: 'zaotu-workbench', type: 'IMPORT_SELECTED', platform: result.platform || 'doubao', result }, '*');
+      };
+
+      document.querySelector('.step-track').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-step-jump]');
+        if (!button || button.disabled) return;
+        const index = Number(button.dataset.stepJump);
+        const node = workflowNodes[index];
+        const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        node?.scrollIntoView({ behavior, block: 'start' });
+        if (index === 0) openProductEditor();
+        if (index === 1) {
+          editingAgent = generated;
+          nextButton.disabled = interrupted;
+          setAgentBusy(false);
+          showToast(generated ? '已回到 Agent，可调整方向后重新生成' : '已回到 Agent 整理');
+        }
+        if (index === 2 && progress >= 2) openDetail('a');
+        if (index === 3 && progress >= 3) openDetail('b');
+        if (index === 4 && progress >= 4) openDetail('c');
+      });
+      workflowCanvas.addEventListener('click', (event) => {
+        const platformTrigger = event.target.closest('[data-platform-picker-trigger]');
+        if (platformTrigger) {
+          const picker = platformTrigger.closest('[data-platform-picker]');
+          const willOpen = !picker.classList.contains('is-open');
+          closePlatformPickers(picker);
+          picker.classList.toggle('is-open', willOpen);
+          platformTrigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+          picker.querySelector('[data-platform-picker-menu]')?.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+          return;
+        }
+        const openNode = event.target.closest('[data-node-open]')?.dataset.nodeOpen;
+        const closeNode = event.target.closest('[data-detail-close]')?.dataset.detailClose;
+        if (openNode) { openDetail(openNode); return; }
+        if (closeNode) { closeDetail(closeNode); return; }
+        const action = event.target.closest('[data-detail-action]')?.dataset.detailAction;
+        const bridgeAction = event.target.closest('[data-bridge-action]')?.dataset.bridgeAction;
+        if (action === 'confirm-a') confirmDescription();
+        if (action === 'save-brief') saveAgentDraftEdits().catch((error) => showToast(error.message || '简报修改保存失败'));
+        if (action === 'regenerate-a') regenerateDescriptionA();
+        if (action === 'confirm-b') confirmPrompt();
+        if (action === 'resend-b') resendPromptB();
+        if (action === 'generate') generateResults();
+        if (action === 'regenerate-results') resendGeneration();
+        if (action === 'import') importResult();
+        if (bridgeAction === 'open-platform') {
+          const selected = [...selectedGenerationPlatforms];
+          if (!selected.length) { showToast('请先选择要打开的平台'); return; }
+          const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
+          selected.forEach((platform) => {
+            const item = generationPlatforms[platform];
+            if (!item) return;
+            const previousTimer = platformOpenTimers.get(platform);
+            if (previousTimer) window.clearTimeout(previousTimer);
+            item.state = 'opening';
+            item.message = '正在打开平台页面…';
+            renderPlatformStatuses();
+            if (bridgeStatus) bridgeStatus.textContent = `正在打开${item.label}网页…`;
+            window.postMessage({ source: 'zaotu-workbench', type: 'OPEN_PLATFORM', platform }, '*');
+            const timer = window.setTimeout(() => {
+              if (generationPlatforms[platform]?.state !== 'opening') return;
+              generationPlatforms[platform].state = doubaoExtensionReady ? 'not_open' : 'failed';
+              generationPlatforms[platform].message = doubaoExtensionReady
+                ? '平台页面未响应，请刷新平台页面后重试'
+                : '未检测到扩展，请重新加载扩展并刷新工作台';
+              renderPlatformStatuses();
+              if (bridgeStatus) bridgeStatus.textContent = generationPlatforms[platform].message;
+              showToast(`${item.label}：${generationPlatforms[platform].message}`);
+            }, 3000);
+            platformOpenTimers.set(platform, timer);
+          });
+        }
+        if (bridgeAction === 'copy-prompt') copyText(promptB, '提示词 B 已复制');
+        if (bridgeAction === 'copy-image') {
+          const copyImageUrl = aReferenceImageUrl || productState.imageUrl;
+          if (!copyImageUrl || isExampleProductImage(copyImageUrl)) showToast('当前没有可发送图片，可直接发送提示词');
+          else copyText(new URL(copyImageUrl, window.location.href).href, '图片地址已复制');
+        }
+        if (bridgeAction === 'help') openDoubaoHelp();
+        if (bridgeAction === 'manual-result') detailContent.querySelector('#result-upload-input')?.click();
+      });
+      detailContent.addEventListener('change', (event) => {
+        if (event.target.matches('input[name="generation-platform"]')) {
+          selectedGenerationPlatforms = new Set([...detailContent.querySelectorAll('input[name="generation-platform"]:checked')].map((input) => input.value));
+          syncPlatformPicker();
+          renderPlatformStatuses();
+          persistState();
+          return;
+        }
+        if (event.target.id === 'result-upload-input') uploadGeneratedResults(event.target.files);
+        if (event.target.id === 'a-reference-image') uploadABriefImage(event.target.files?.[0]);
+      });
+
+      window.addEventListener('message', (event) => {
+        if (event.source !== window || event.data?.source !== 'zaotu-doubao-extension') return;
+        const message = event.data;
+        if (message.jobId && invalidatedGenerationJobs.has(message.jobId)) return;
+        const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
+        const action = detailContent.querySelector('[data-detail-action]');
+        if (message.type === 'DOUBAO_EXTENSION_READY') {
+          doubaoExtensionReady = true;
+          if (bridgeStatus && ['waiting', 'missing', 'idle'].includes(doubaoBridgeState)) bridgeStatus.textContent = '扩展已就绪，请确认豆包页面已打开并登录';
+          return;
+        }
+        if (message.type === 'PLATFORM_STATUS') {
+          const platform = generationPlatforms[message.platform];
+          if (!platform) return;
+          platform.state = message.state || platform.state;
+          platform.message = message.message || '';
+          renderPlatformStatuses();
+          syncGenerationStatus(platform.state, platform.message, message.results, message.platform, message);
+          if (message.results?.length && isCurrentResultMessage(message)) {
+            const candidates = mergePlatformResults(message.platform, message.results, message.jobId);
+            if (candidates.length) {
+              resultGenerated = true;
+              persistState(); syncProject(); renderResults();
+            }
+          }
+          if (platform.state === 'login_required') showToast(`${platform.label}未登录，其他平台任务继续执行`);
+          else if (['adapter_error', 'upload_error', 'submit_error'].includes(platform.state)) showToast(`${platform.label}：${platform.message}`);
+          if (platform.state === 'result_ready') setResultAction();
+          return;
+        }
+        if (message.type === 'PLATFORM_ERROR') {
+          const platform = generationPlatforms[message.platform];
+          if (!platform) return;
+          platform.state = message.needsPage ? 'not_open' : 'failed';
+          platform.message = message.message || `${platform.label}连接失败`;
+          renderPlatformStatuses();
+          syncGenerationStatus(platform.state, platform.message, undefined, message.platform, message);
+          showToast(`${platform.label}：${platform.message}，其他平台任务继续执行`);
+          if (action) action.disabled = false;
+          return;
+        }
+        if (message.type === 'PLATFORM_RESULT_CANDIDATES') {
+          const platform = generationPlatforms[message.platform];
+          if (!platform || !isCurrentResultMessage(message)) return;
+          const candidates = mergePlatformResults(message.platform, message.results, message.jobId);
+          if (!candidates.length) return;
+          resultGenerated = true; platform.state = 'result_ready'; platform.message = `${candidates.length} 张新结果待选择`;
+           syncGenerationStatus('result_ready', platform.message, candidates, message.platform, message);
+          persistState(); syncProject(); renderResults(); renderPlatformStatuses();
+          setResultAction();
+          return;
+        }
+        if (message.type === 'PLATFORM_OPENED' || message.type === 'PLATFORM_PAGE_OPENED') {
+          const platform = generationPlatforms[message.platform];
+          if (platform) {
+            const timer = platformOpenTimers.get(message.platform);
+            if (timer) { window.clearTimeout(timer); platformOpenTimers.delete(message.platform); }
+            if (message.type === 'PLATFORM_PAGE_OPENED') {
+              platform.state = 'page_opened';
+              platform.message = '页面已打开，请登录后重试';
+              if (bridgeStatus) bridgeStatus.textContent = `${platform.label}网页已打开，请登录后返回工作台。`;
+              showToast(`${platform.label}网页已打开`);
+            } else if (['opening', 'queued', 'preparing'].includes(platform.state)) {
+              platform.state = 'page_opened';
+              platform.message = '已连接平台页面，等待任务发送';
+            }
+            renderPlatformStatuses();
+          }
+          return;
+        }
+        if (message.type === 'DOUBAO_OPENED') {
+          doubaoBridgeState = 'preparing';
+          if (bridgeStatus) bridgeStatus.textContent = '已连接已打开的豆包页面，正在检查登录并提交任务…';
+        }
+        if (message.type === 'DOUBAO_STATUS') {
+          doubaoAttemptId += 1;
+          doubaoBridgeState = message.state || doubaoBridgeState;
+           syncGenerationStatus(message.state || 'running', message.message || '', message.results, 'doubao', message);
+          if (bridgeStatus && message.message) bridgeStatus.textContent = message.message;
+          if (message.state === 'result_ready') {
+            if (action) { action.disabled = false; action.dataset.detailAction = 'import'; action.textContent = '保存选中的结果'; action.insertAdjacentHTML('beforeend', '<svg class="ui-icon"><use href="#i-box"></use></svg>'); }
+            showToast(message.message || '已收到豆包结果');
+          }
+          if (message.state === 'import_error' || message.state === 'login_required' || message.state === 'adapter_error' || message.state === 'upload_error' || message.state === 'submit_error') {
+            if (action) { action.disabled = false; action.dataset.detailAction = 'generate'; action.textContent = '重试生成'; }
+            showToast(message.message || '豆包任务遇到问题');
+          }
+        }
+        if (message.type === 'DOUBAO_PAGE_OPENED') {
+          if (bridgeStatus) bridgeStatus.textContent = '豆包已打开。请完成登录后回工作台启动任务。';
+          showToast('豆包网页已打开');
+        }
+        if (message.type === 'DOUBAO_ERROR') {
+          doubaoAttemptId += 1;
+          doubaoBridgeState = 'error';
+          if (bridgeStatus) bridgeStatus.textContent = message.message || '扩展执行失败，请改为手动操作。';
+          if (action) { action.disabled = false; action.dataset.detailAction = 'generate'; action.textContent = message.needsPage ? '重试所选平台' : '重试生成'; }
+          showToast(message.message || '豆包扩展执行失败');
+        }
+        if (message.type === 'DOUBAO_RESULT_CANDIDATES') {
+          if (!isCurrentResultMessage(message)) return;
+          const candidates = mergePlatformResults('doubao', message.results, message.jobId);
+          if (!candidates.length) return;
+          const doubao = generationPlatforms.doubao;
+          doubao.state = 'result_ready';
+          doubao.message = `${candidates.length} 张新结果待选择`;
+           syncGenerationStatus('result_ready', `${generatedResults.length} 张结果待选择`, candidates, 'doubao', message);
+          resultGenerated = true;
+          doubaoBridgeState = 'result';
+          persistState();
+          syncProject();
+          renderResults();
+          renderPlatformStatuses();
+          setResultAction();
+          if (bridgeStatus) bridgeStatus.textContent = `已同步 ${generatedResults.length} 张豆包结果到工作台，请选择要保存的图片。`;
+          showToast(`已从豆包收到 ${candidates.length} 张新结果`);
+        }
+        if (message.type === 'PLATFORM_IMPORTED' || message.type === 'DOUBAO_IMPORTED' || message.type === 'DOUBAO_IMPORTED_RESULT') {
+          completeSelectedImport(message.result).catch((error) => {
+            const platform = message.result?.platform || 'doubao';
+            generationPlatforms[platform].state = 'import_error';
+            generationPlatforms[platform].message = error.message || '结果归档失败';
+            renderPlatformStatuses();
+            if (bridgeStatus) bridgeStatus.textContent = generationPlatforms[platform].message;
+            if (action) action.disabled = false;
+            showToast(`${generationPlatforms[platform].label}：${generationPlatforms[platform].message}`);
+          });
+        }
+      });
+      workflowCanvas.addEventListener('input', (event) => {
+        const input = event.target.closest('[data-agent-field]');
+        if (!input) return;
+        const key = input.dataset.agentField;
+        descriptionAFieldEdits[key] = input.value;
+        refreshDraftFieldSource(key);
+        persistState();
+      });
+      modal.addEventListener('click', (event) => {
+        const modalAction = event.target.closest('[data-modal-action]')?.dataset.modalAction;
+        if (modalAction === 'copy-prompt') copyText(promptB, '提示词 B 已复制');
+      });
+
+      const restoreWorkflow = () => {
+        if (progress >= 2) { markStepComplete(1); unlockCard('a'); setCurrentStep(2, '确认创作简报'); }
+        if (progress >= 3) { unlockCard('b'); markStepComplete(2); setCurrentStep(3, '等待确认'); }
+        if (progress >= 4) { unlockCard('c'); markStepComplete(3); setCurrentStep(4, '等待生成'); }
+        if (progress >= 5) { markStepComplete(4); setStatus('结果已归档', 'is-ready'); }
+        if (progress >= 4) openDetail('c', false);
+        else if (progress >= 3) openDetail('b', false);
+        else if (progress >= 2) openDetail('a', false);
+      };
+
+      document.querySelector('.product-properties .text-button').addEventListener('click', openProductEditor);
+      const imageInput = document.querySelector('.image-upload-input');
+      document.querySelector('.image-upload-button').addEventListener('click', () => imageInput.click());
+      imageInput.addEventListener('change', () => uploadProductImage(imageInput.files?.[0]));
+      document.querySelector('.project-tools .button-secondary:not([data-open-task-center])').addEventListener('click', openVersionHistory);
+      document.querySelector('[data-open-task-center]')?.addEventListener('click', () => openTaskCenter());
+      document.querySelector('[data-open-agent-history]')?.addEventListener('click', () => openAgentHistory());
+      document.querySelector('.new-project').addEventListener('click', openNewProject);
+      document.querySelector('.modal-close').addEventListener('click', closeModal);
+      modal.addEventListener('click', (event) => {
+        const runSelection = event.target.closest('[data-agent-run-select]');
+        if (runSelection) { selectAgentHistoryRun(runSelection.dataset.agentRunSelect); return; }
+        const restoreButton = event.target.closest('[data-agent-run-restore]');
+        if (restoreButton) { restoreAgentRun(restoreButton.dataset.agentRunRestore); return; }
+        const action = event.target.closest('[data-modal-action]')?.dataset.modalAction;
+        if (action === 'cancel') closeModal();
+        if (action === 'save-product') saveProduct();
+        if (action === 'create-project') createProject();
+        const taskActionElement = event.target.closest('[data-task-action]');
+        if (taskActionElement) {
+          handleTaskAction(taskActionElement.dataset.taskAction, taskActionElement.dataset.taskJob || generationJobId, taskActionElement.dataset.taskPlatform || '');
+          return;
+        }
+        const taskSelection = event.target.closest('[data-task-select]');
+        if (taskSelection) { openTaskCenter(taskSelection.dataset.taskSelect); return; }
+        const versionIndex = event.target.closest('[data-version-index]')?.dataset.versionIndex;
+        if (versionIndex !== undefined) {
+          const version = versions[Number(versionIndex)];
+          if (version) {
+            window.localStorage.setItem(storageKey, JSON.stringify({ ...version, generated: version.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
+            window.location.reload();
+          }
+        }
+      });
+      modal.addEventListener('cancel', (event) => { event.preventDefault(); closeModal(); });
+
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
+        const savedOption = sceneOptions.find((option) => option.textContent.trim() === saved?.selectedScene);
+        if (savedOption) {
+          sceneOptions.forEach((option) => {
+            option.classList.toggle('selected', option === savedOption);
+            option.setAttribute('aria-pressed', option === savedOption ? 'true' : 'false');
+          });
+        }
+        if (saved) {
+          progress = saved.progress || (saved.generated ? 2 : 1);
+          descriptionA = saved.descriptionA || '';
+          descriptionAStructured = saved.descriptionAStructured && typeof saved.descriptionAStructured === 'object' ? saved.descriptionAStructured : {};
+          descriptionADraft = saved.descriptionADraft && typeof saved.descriptionADraft === 'object' ? saved.descriptionADraft : null;
+          descriptionAFieldEdits = saved.descriptionAFieldEdits && typeof saved.descriptionAFieldEdits === 'object' ? saved.descriptionAFieldEdits : {};
+          currentAgentRunId = saved.currentAgentRunId || '';
+          currentAgentRunVersion = Number(saved.currentAgentRunVersion) || 0;
+          aReferenceImageUrl = saved.aReferenceImageUrl || '';
+          promptB = saved.promptB || '';
+          resultGenerated = Boolean(saved.resultGenerated);
+          resultSelected = Number.isInteger(saved.resultSelected) ? saved.resultSelected : -1;
+          generatedResults = Array.isArray(saved.generatedResults)
+            ? saved.generatedResults.map((result) => normalizeResult(result, result?.platform, result?.jobId || saved.generationJobId)).filter(Boolean)
+            : [];
+          if (resultSelected >= generatedResults.length) resultSelected = -1;
+          doubaoBridgeState = saved.doubaoBridgeState || 'idle';
+          generationJobId = saved.generationJobId || '';
+          selectedGenerationPlatforms = new Set(Array.isArray(saved.selectedGenerationPlatforms) && saved.selectedGenerationPlatforms.length ? saved.selectedGenerationPlatforms : ['doubao']);
+          invalidatedGenerationJobs = new Set(Array.isArray(saved.invalidatedGenerationJobs) ? saved.invalidatedGenerationJobs : []);
+          productState = { ...productState, ...(saved.product || {}) };
+          versions = Array.isArray(saved.versions) ? saved.versions : [];
+          projectName = saved.projectName || projectName;
+          projectId = saved.projectId || projectId;
+          projectApiUrl = `/api/projects/${encodeURIComponent(projectId)}`;
+          agentNote = saved.agentNote || '';
+          serverUpdatedAt = saved.updatedAt || '';
+          if (saved.agentReply) document.querySelector('.agent-greeting strong').textContent = saved.agentReply;
+          if (saved.agentQuestion) document.querySelector('.agent-greeting p').textContent = saved.agentQuestion;
+        }
+        if (saved?.generated) {
+          generated = true;
+          currentStep.classList.remove('current');
+          currentStep.classList.add('completed');
+          currentStep.removeAttribute('aria-current');
+          currentStep.querySelector('.step-number').innerHTML = '<svg class="ui-icon"><use href="#i-check"></use></svg>';
+          currentStepLabel.textContent = '已完成';
+          const nextStep = document.querySelectorAll('.flow-step')[2];
+          nextStep.classList.add('current');
+          nextStep.setAttribute('aria-current', 'step');
+          setStatus('描述词 A 已生成', 'is-ready');
+          nextButton.classList.add('is-complete');
+          nextButton.innerHTML = '描述词 A 已生成<svg class="ui-icon"><use href="#i-check"></use></svg>';
+        }
+        if (saved?.interrupted) {
+          interrupted = true;
+          interruptButton.classList.add('is-resume');
+          interruptButton.innerHTML = '<span aria-hidden="true"></span>继续节点';
+          currentStep.classList.add('paused');
+          nextButton.disabled = true;
+          nextButton.setAttribute('aria-disabled', 'true');
+          setStatus('已中断', 'is-interrupted');
+          currentStepLabel.innerHTML = '<i></i>已中断';
+        }
+      } catch (error) {
+        // A malformed local draft should not prevent the page from opening.
+      }
+      renderProduct();
+      renderProjectName();
+      restoreWorkflow();
+      restoreProjectFromServer();
+      restoreAgentRunsFromServer();
+      restoreGenerationJobFromServer();
+    })();
+  </script>
+  <script type="module" src="./scroll-workspace.js"></script>
+</body>
+</html>

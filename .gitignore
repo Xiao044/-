@@ -1,0 +1,8 @@
+.idea/
+.vscode/
+Thumbs.db
+*.log
+.env
+.env.*
+!*.env.example
+data/

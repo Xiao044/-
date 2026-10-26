@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "造图 · 多平台工作流桥接",
+  "version": "0.4.1",
+  "description": "复用已打开的生图平台页面，检查登录状态，填入商品图和提示词并提交生成。",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "http://127.0.0.1:5173/*",
+    "http://localhost:5173/*",
+    "http://127.0.0.1:5174/*",
+    "http://localhost:5174/*",
+    "https://www.doubao.com/*",
+    "https://doubao.com/*",
+    "https://*.doubao.com/*",
+    "https://*.volccdn.com/*",
+    "https://*.byteimg.com/*",
+    "https://*.bytecdn.cn/*",
+    "https://*.ibytedtos.com/*",
+    "https://*.bytedance.com/*",
+    "https://*.bytedance.net/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://gemini.google.com/*",
+    "https://lovart.ai/*",
+    "https://www.lovart.ai/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1:5173/*", "http://localhost:5173/*", "http://127.0.0.1:5174/*", "http://localhost:5174/*"],
+      "js": ["content-workbench.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.doubao.com/*", "https://doubao.com/*", "https://*.doubao.com/*"],
+      "js": ["content-doubao.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["platform-common.js", "content-chatgpt.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["platform-common.js", "content-gemini.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://lovart.ai/*", "https://www.lovart.ai/*"],
+      "js": ["platform-common.js", "content-lovart.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
