@@ -18,8 +18,8 @@ const getPort = () => new Promise((resolve, reject) => {
   });
 });
 
-const startServer = async (t) => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-generation-'));
+const startServer = async (t, options = {}) => {
+  const dataDir = options.dataDir || fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-generation-'));
   const port = await getPort();
   const child = spawn(process.execPath, [serverPath], {
     cwd: root,
@@ -29,16 +29,14 @@ const startServer = async (t) => {
   let logs = '';
   child.stdout.on('data', (chunk) => { logs += chunk; });
   child.stderr.on('data', (chunk) => { logs += chunk; });
-  t.after(() => {
-    child.kill();
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  });
+  t.after(() => { child.kill(); });
+  if (!options.dataDir) t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const base = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`server exited: ${logs}`);
     try {
-      if ((await fetch(`${base}/api/health`)).ok) return { base, dataDir };
+      if ((await fetch(`${base}/api/health`)).ok) return { base, dataDir, child };
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
@@ -48,6 +46,74 @@ const startServer = async (t) => {
 const json = (base, url, options = {}) => fetch(`${base}${url}`, {
   headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   ...options
+});
+
+test('task center API lists 20 mixed jobs and preserves attempt results after restart', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-generation-restart-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, { dataDir });
+  const createdJobs = [];
+  for (let index = 0; index < 20; index += 1) {
+    const response = await json(server.base, '/api/projects/demo/generation-jobs', {
+      method: 'POST', body: JSON.stringify({ platforms: ['doubao', 'gemini'], prompt: `snapshot prompt ${index}`, productImageUrl: `/uploads/snapshot-${index}.png` })
+    });
+    assert.equal(response.status, 201);
+    createdJobs.push((await response.json()).job);
+  }
+  const target = createdJobs[7];
+  let attemptId = target.platforms.doubao.attemptId;
+  await json(server.base, `/api/projects/demo/generation-jobs/${target.jobId}/platforms/doubao`, {
+    method: 'PATCH', body: JSON.stringify({ jobId: target.jobId, platform: 'doubao', attemptId, status: 'extension_disconnected', errorCode: 'EXTENSION_DISCONNECTED', errorMessage: 'first attempt failed', message: 'bridge lost' })
+  });
+  const retried = await json(server.base, `/api/projects/demo/generation-jobs/${target.jobId}/platforms/doubao/retry`, {
+    method: 'POST', body: JSON.stringify({ jobId: target.jobId, platform: 'doubao', attemptId })
+  });
+  assert.equal(retried.status, 200);
+  attemptId = (await retried.json()).job.platforms.doubao.attemptId;
+  const assetResponse = await fetch(`${server.base}/api/projects/demo/assets`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: Buffer.from('saved result') });
+  const asset = await assetResponse.json();
+  await json(server.base, `/api/projects/demo/generation-jobs/${target.jobId}/results`, {
+    method: 'POST', body: JSON.stringify({ jobId: target.jobId, platform: 'doubao', attemptId, assetUrl: asset.url, id: 'kept-result' })
+  });
+  await json(server.base, `/api/projects/demo/generation-jobs/${target.jobId}/platforms/gemini`, {
+    method: 'PATCH', body: JSON.stringify({ jobId: target.jobId, platform: 'gemini', attemptId: target.platforms.gemini.attemptId, status: 'cancelled', errorMessage: 'cancelled in test' })
+  });
+  const list = await (await fetch(`${server.base}/api/projects/demo/generation-jobs`)).json();
+  assert.equal(list.jobs.length, 20);
+  assert.deepEqual(new Set(list.jobs.map((job) => job.status)), new Set(['queued', 'failed']));
+  const listedTarget = list.jobs.find((job) => job.jobId === target.jobId);
+  assert.equal(listedTarget.platforms.doubao.attempts.length, 1);
+  assert.equal(listedTarget.platforms.doubao.attempts[0].errorMessage, 'first attempt failed');
+  assert.equal(listedTarget.platforms.doubao.savedResults[0].id, 'kept-result');
+  assert.equal(listedTarget.platforms.gemini.status, 'cancelled');
+
+  server.child.kill();
+  await new Promise((resolve, reject) => {
+    if (server.child.exitCode !== null) return resolve();
+    server.child.once('exit', resolve);
+    server.child.once('error', reject);
+  });
+  const restarted = await startServer(t, { dataDir });
+  const afterRestart = await (await fetch(`${restarted.base}/api/projects/demo/generation-jobs`)).json();
+  assert.equal(afterRestart.jobs.length, 20);
+  const persisted = afterRestart.jobs.find((job) => job.jobId === target.jobId);
+  assert.equal(persisted.prompt, 'snapshot prompt 7');
+  assert.equal(persisted.productImageUrl, '/uploads/snapshot-7.png');
+  assert.equal(persisted.platforms.doubao.attempts[0].errorCode, 'EXTENSION_DISCONNECTED');
+  assert.equal(persisted.platforms.doubao.savedResults[0].id, 'kept-result');
+  assert.equal(persisted.platforms.gemini.status, 'cancelled');
+});
+
+test('task center frontend exposes filters, attempt history, and snapshot-based retry', () => {
+  const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(source, /data-task-filter="search"/);
+  assert.match(source, /data-task-filter="status"/);
+  assert.match(source, /data-task-filter="platform"/);
+  assert.match(source, /task-attempt-history/);
+  assert.match(source, /attempt\.attemptId/);
+  assert.match(source, /payload\.job\.productImageUrl/);
+  assert.match(source, /prompt: payload\.job\.prompt \|\| ''/);
+  assert.doesNotMatch(source, /retryImageUrl = aReferenceImageUrl \|\| productState\.imageUrl/);
 });
 
 test('generation attempts reject stale PATCH and result writes', async (t) => {

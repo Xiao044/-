@@ -784,6 +784,8 @@ h1 { font-size: 24px; line-height: 1.25; }
 .task-center-empty strong { color: #665d43; font-size: 14px; }
 .task-center-empty span { line-height: 1.7; }
 .task-center-empty .button { justify-self: center; margin-top: 8px; }
+.task-center-filters { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(110px, .45fr) minmax(110px, .45fr); gap: 8px; margin-bottom: 10px; }
+.task-center-filters input, .task-center-filters select { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid #e8e0cc; border-radius: 6px; background: #fffdf6; color: #665d43; font: inherit; font-size: 11px; }
 .task-center-layout { display: grid; grid-template-columns: minmax(230px, .85fr) minmax(320px, 1.15fr); gap: 14px; min-height: 360px; }
 .task-list { display: grid; align-content: start; gap: 6px; max-height: 430px; overflow: auto; padding-right: 3px; }
 .task-list-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; width: 100%; padding: 10px 11px; border: 1px solid #e8e0cc; border-radius: 8px; background: #fffdf6; color: #665d43; text-align: left; cursor: pointer; }
@@ -812,9 +814,19 @@ h1 { font-size: 24px; line-height: 1.25; }
 .task-detail-platform p { margin: 7px 0 4px; color: #81765f; font-size: 11px; line-height: 1.5; }
 .task-detail-actions { display: flex; gap: 12px; margin-top: 7px; }
 .task-detail-actions .text-button { font-size: 11px; }
+.task-attempt-history { display: grid; gap: 6px; margin-top: 9px; padding-top: 8px; border-top: 1px solid #eee8d6; }
+.task-attempt-history > strong { color: #99854b; font-size: 10px; }
+.task-attempt { display: grid; gap: 3px; padding: 7px 8px; border-radius: 5px; background: #f8f5ea; color: #81765f; font-size: 10px; }
+.task-attempt strong { color: #665d43; }
+.task-attempt code { overflow-wrap: anywhere; color: #99854b; font-size: 9px; }
+.task-attempt p { margin: 0; line-height: 1.4; }
+.task-attempt-results { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.task-attempt-results a { color: #7b6940; text-decoration: underline; text-underline-offset: 2px; }
 .task-detail-footer { align-items: flex-end; margin-top: 14px; }
 .task-detail-footer .button { min-height: 28px; padding: 0 9px; font-size: 11px; }
 @media (max-width: 700px) {
+  .task-center-filters { grid-template-columns: 1fr 1fr; }
+  .task-center-filters input { grid-column: 1 / -1; }
   .task-center-layout { grid-template-columns: 1fr; }
   .task-list { max-height: 220px; }
 }

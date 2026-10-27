@@ -1216,9 +1216,21 @@
         return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
       };
       const taskPlatformLabels = { doubao: '豆包', chatgpt: 'ChatGPT', gemini: 'Gemini', lovart: 'Lovart' };
-      const taskCenterMarkup = (jobs, selectedJobId = '') => {
-        if (!jobs.length) return '<div class="task-center-empty"><strong>还没有生成任务</strong><span>确认提示词 B 后，从多平台生成节点发起任务。</span></div>';
+      const taskCenterFilters = { search: '', status: '', platform: '' };
+      let taskCenterJobs = [];
+      const filterTaskCenterJobs = (jobs) => jobs.filter((job) => {
+        const search = taskCenterFilters.search.trim().toLocaleLowerCase();
+        const searchable = `${job.jobId || ''} ${job.prompt || ''} ${Object.keys(job.platforms || {}).map((key) => taskPlatformLabels[key] || key).join(' ')}`.toLocaleLowerCase();
+        if (search && !searchable.includes(search)) return false;
+        if (taskCenterFilters.status && job.status !== taskCenterFilters.status) return false;
+        if (taskCenterFilters.platform && !Object.prototype.hasOwnProperty.call(job.platforms || {}, taskCenterFilters.platform)) return false;
+        return true;
+      });
+      const taskCenterMarkup = (allJobs, selectedJobId = '') => {
+        const jobs = filterTaskCenterJobs(allJobs);
+        if (!allJobs.length) return '<div class="task-center-empty"><strong>还没有生成任务</strong><span>确认提示词 B 后，从多平台生成节点发起任务。</span></div>';
         const selected = jobs.find((job) => job.jobId === selectedJobId) || jobs[0];
+        if (!selected) return `<div class="task-center-filters"><input type="search" data-task-filter="search" aria-label="搜索任务" placeholder="搜索任务编号、提示词或平台" value="${escapeHtml(taskCenterFilters.search)}"><select data-task-filter="status" aria-label="按状态筛选"><option value="">全部状态</option>${Object.entries(taskStatusLabels).filter(([key]) => ['queued','running','completed','failed','cancelled','expired'].includes(key)).map(([key,label]) => `<option value="${key}"${taskCenterFilters.status === key ? ' selected' : ''}>${label}</option>`).join('')}</select><select data-task-filter="platform" aria-label="按平台筛选"><option value="">全部平台</option>${Object.entries(taskPlatformLabels).map(([key,label]) => `<option value="${key}"${taskCenterFilters.platform === key ? ' selected' : ''}>${label}</option>`).join('')}</select></div><div class="task-center-empty"><strong>没有匹配的任务</strong><span>调整搜索条件或筛选项。</span></div>`;
         const rows = jobs.map((job) => {
           const platforms = Object.entries(job.platforms || {}).map(([key, item]) => `<span class="task-platform-chip is-${escapeHtml(item.status || 'queued')}">${escapeHtml(taskPlatformLabels[key] || key)} · ${escapeHtml(taskStatusLabel(item.status))}</span>`).join('');
           return `<button class="task-list-row${job.jobId === selected.jobId ? ' is-selected' : ''}" type="button" data-task-select="${escapeHtml(job.jobId)}"><span class="task-list-main"><strong>${escapeHtml(job.jobId)}</strong><small>${escapeHtml(taskTime(job.createdAt))}</small></span><span class="task-list-status is-${escapeHtml(job.status || 'queued')}">${escapeHtml(taskStatusLabel(job.status))}</span><span class="task-platform-chips">${platforms}</span></button>`;
@@ -1227,10 +1239,15 @@
           const canRetry = !['completed', 'queued', 'checking_login', 'page_opened', 'filling', 'submitted', 'generating', 'running', 'result_ready'].includes(item.status);
           const canCancel = !['completed', 'cancelled', 'expired'].includes(item.status);
           const resultCount = (item.savedResults || []).length || (item.results || []).length;
-          return `<div class="task-detail-platform"><div class="task-detail-platform-head"><strong>${escapeHtml(taskPlatformLabels[key] || key)}</strong><span class="task-list-status is-${escapeHtml(item.status || 'queued')}">${escapeHtml(taskStatusLabel(item.status))}</span></div><p>${escapeHtml(item.errorMessage || item.message || '暂无错误信息')}</p><small>尝试 ${escapeHtml(String(item.attemptCount || 1))} · 更新于 ${escapeHtml(taskTime(item.updatedAt || item.lastAttemptAt))} · 结果 ${resultCount} 张</small><div class="task-detail-actions">${canRetry ? `<button class="text-button" type="button" data-task-action="retry" data-task-job="${escapeHtml(selected.jobId)}" data-task-platform="${escapeHtml(key)}">重试此平台</button>` : ''}${canCancel ? `<button class="text-button" type="button" data-task-action="cancel" data-task-job="${escapeHtml(selected.jobId)}" data-task-platform="${escapeHtml(key)}">取消</button>` : ''}</div></div>`;
+          const attempts = (item.attempts || []).map((attempt) => {
+            const attemptResults = [...(attempt.savedResults || []), ...(attempt.results || [])].filter((result, index, all) => result?.url && all.findIndex((item) => item.url === result.url) === index);
+            const resultLinks = attemptResults.map((result) => `<a href="${escapeHtml(result.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(result.id || result.candidateId || '查看结果')} · ${escapeHtml(taskTime(result.createdAt))}</a>`).join('');
+            return `<div class="task-attempt is-history"><strong>历史尝试 ${escapeHtml(String(attempt.attemptCount || ''))}</strong><code>${escapeHtml(attempt.attemptId || '未知尝试')}</code><span>${escapeHtml(taskStatusLabel(attempt.status))} · ${escapeHtml(taskTime(attempt.startedAt || attempt.lastAttemptAt || attempt.updatedAt))}</span><p>${escapeHtml(attempt.errorMessage || attempt.message || '无错误信息')}</p><small>结果 ${attemptResults.length} 张</small>${resultLinks ? `<div class="task-attempt-results">${resultLinks}</div>` : ''}</div>`;
+          }).join('');
+          return `<div class="task-detail-platform"><div class="task-detail-platform-head"><strong>${escapeHtml(taskPlatformLabels[key] || key)}</strong><span class="task-list-status is-${escapeHtml(item.status || 'queued')}">${escapeHtml(taskStatusLabel(item.status))}</span></div><p>${escapeHtml(item.errorMessage || item.message || '暂无错误信息')}</p><small>当前尝试 ${escapeHtml(String(item.attemptCount || 1))} · ID ${escapeHtml(item.attemptId || '未知')} · 更新于 ${escapeHtml(taskTime(item.updatedAt || item.lastAttemptAt))} · 结果 ${resultCount} 张</small>${attempts ? `<div class="task-attempt-history"><strong>此前尝试</strong>${attempts}</div>` : ''}<div class="task-detail-actions">${canRetry ? `<button class="text-button" type="button" data-task-action="retry" data-task-job="${escapeHtml(selected.jobId)}" data-task-platform="${escapeHtml(key)}">重试此平台</button>` : ''}${canCancel ? `<button class="text-button" type="button" data-task-action="cancel" data-task-job="${escapeHtml(selected.jobId)}" data-task-platform="${escapeHtml(key)}">取消</button>` : ''}</div></div>`;
         }).join('');
         const canCancelJob = !['completed', 'failed', 'cancelled', 'expired'].includes(selected.status);
-        return `<div class="task-center-layout"><div class="task-list" role="list" aria-label="生成任务列表">${rows}</div><section class="task-detail" aria-live="polite"><header class="task-detail-header"><div><span>任务详情</span><strong>${escapeHtml(selected.jobId)}</strong></div><span class="task-list-status is-${escapeHtml(selected.status || 'queued')}">${escapeHtml(taskStatusLabel(selected.status))}</span></header><p class="task-detail-prompt">${escapeHtml(String(selected.prompt || '').slice(0, 220))}</p><div class="task-detail-platforms">${detailPlatforms}</div><div class="task-detail-footer"><small>创建于 ${escapeHtml(taskTime(selected.createdAt))} · 最近更新 ${escapeHtml(taskTime(selected.updatedAt))}</small>${canCancelJob ? `<button class="button button-secondary" type="button" data-task-action="cancel-job" data-task-job="${escapeHtml(selected.jobId)}">取消整批任务</button>` : ''}</div></section></div>`;
+        return `<div class="task-center-filters"><input type="search" data-task-filter="search" aria-label="搜索任务" placeholder="搜索任务编号、提示词或平台" value="${escapeHtml(taskCenterFilters.search)}"><select data-task-filter="status" aria-label="按状态筛选"><option value="">全部状态</option>${Object.entries(taskStatusLabels).filter(([key]) => ['queued','running','completed','failed','cancelled','expired'].includes(key)).map(([key,label]) => `<option value="${key}"${taskCenterFilters.status === key ? ' selected' : ''}>${label}</option>`).join('')}</select><select data-task-filter="platform" aria-label="按平台筛选"><option value="">全部平台</option>${Object.entries(taskPlatformLabels).map(([key,label]) => `<option value="${key}"${taskCenterFilters.platform === key ? ' selected' : ''}>${label}</option>`).join('')}</select></div><div class="task-center-layout"><div class="task-list" role="list" aria-label="生成任务列表">${rows}</div><section class="task-detail" aria-live="polite"><header class="task-detail-header"><div><span>任务详情</span><strong>${escapeHtml(selected.jobId)}</strong></div><span class="task-list-status is-${escapeHtml(selected.status || 'queued')}">${escapeHtml(taskStatusLabel(selected.status))}</span></header><p class="task-detail-prompt">${escapeHtml(String(selected.prompt || '').slice(0, 220))}</p><div class="task-detail-platforms">${detailPlatforms}</div><div class="task-detail-footer"><small>创建于 ${escapeHtml(taskTime(selected.createdAt))} · 最近更新 ${escapeHtml(taskTime(selected.updatedAt))}</small>${canCancelJob ? `<button class="button button-secondary" type="button" data-task-action="cancel-job" data-task-job="${escapeHtml(selected.jobId)}">取消整批任务</button>` : ''}</div></section></div>`;
       };
       const agentRunStatusLabels = { completed: '已完成', failed: '失败', waiting_user: '等待补充', running: '运行中', queued: '排队中', cancelled: '已取消' };
       const agentRunTaskLabel = (task) => task === 'description_a' ? '描述词 A' : task === 'follow_up' ? '创作追问' : task || '未知任务';
@@ -1348,6 +1365,7 @@
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload.error || '任务记录读取失败');
           const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+          taskCenterJobs = jobs;
           modalBody.innerHTML = taskCenterMarkup(jobs, selectedJobId);
         } catch (error) {
           modalBody.innerHTML = `<div class="task-center-empty"><strong>任务记录读取失败</strong><span>${escapeHtml(error.message || '服务端暂不可用')}</span><button class="button button-secondary" type="button" data-task-action="refresh">重试读取</button></div>`;
@@ -1399,8 +1417,7 @@
             }
             if (action === 'retry' && payload.job.platforms?.[platform]) {
               const entry = payload.job.platforms[platform];
-              const retryImageUrl = aReferenceImageUrl || productState.imageUrl;
-              window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...entry, platform, jobId, projectId, prompt: payload.job.prompt || promptB, ...(retryImageUrl && !isExampleProductImage(retryImageUrl) ? { imageUrl: retryImageUrl, imageUrlAbsolute: new URL(retryImageUrl, window.location.href).href } : {}), workbenchOrigin: window.location.origin } }, '*');
+              window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...entry, platform, jobId, projectId, prompt: payload.job.prompt || '', ...(payload.job.productImageUrl && !isExampleProductImage(payload.job.productImageUrl) ? { imageUrl: payload.job.productImageUrl, imageUrlAbsolute: new URL(payload.job.productImageUrl, window.location.href).href } : {}), workbenchOrigin: window.location.origin } }, '*');
             }
           }
           showToast(action === 'retry' ? `${taskPlatformLabels[platform] || platform} 已重新排队` : '任务状态已更新');
@@ -2068,6 +2085,25 @@
             window.location.reload();
           }
         }
+      });
+      modal.addEventListener('input', (event) => {
+        const filter = event.target.closest('[data-task-filter]');
+        if (!filter) return;
+        taskCenterFilters[filter.dataset.taskFilter] = filter.value;
+        const selectedJobId = modalBody.querySelector('[data-task-select].is-selected')?.dataset.taskSelect || generationJobId;
+        const selectionStart = filter.selectionStart;
+        const selectionEnd = filter.selectionEnd;
+        modalBody.innerHTML = taskCenterMarkup(taskCenterJobs, selectedJobId);
+        const refreshedFilter = modalBody.querySelector(`[data-task-filter="${filter.dataset.taskFilter}"]`);
+        refreshedFilter?.focus();
+        if (refreshedFilter?.setSelectionRange && selectionStart !== null) refreshedFilter.setSelectionRange(selectionStart, selectionEnd);
+      });
+      modal.addEventListener('change', (event) => {
+        const filter = event.target.closest('[data-task-filter]');
+        if (!filter) return;
+        taskCenterFilters[filter.dataset.taskFilter] = filter.value;
+        const selectedJobId = modalBody.querySelector('[data-task-select].is-selected')?.dataset.taskSelect || generationJobId;
+        modalBody.innerHTML = taskCenterMarkup(taskCenterJobs, selectedJobId);
       });
       modal.addEventListener('cancel', (event) => { event.preventDefault(); closeModal(); });
 
