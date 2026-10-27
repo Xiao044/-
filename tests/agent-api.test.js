@@ -57,6 +57,8 @@ const validBody = (note = '请使用自然光') => ({
   platform: 'doubao'
 });
 
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 test('POST /api/agent validates requests before checking model configuration', async (t) => {
   const baseUrl = await startServer(t);
   const invalid = await post(baseUrl, { task: 'generate_b' });
@@ -143,6 +145,96 @@ test('project Agent runs are persisted and listed without changing the legacy re
   assert.equal(listed.runs.length, 1);
   assert.equal(listed.runs[0].input.product.name, '珍珠项链');
   assert.equal('imageUrl' in listed.runs[0].input, false);
+});
+
+test('invalid project Agent input persists a terminal failure timestamp', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const response = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: 'unsupported_task' })
+  });
+  assert.equal(response.status, 400);
+  const payload = await response.json();
+  assert.equal(payload.run.status, 'failed');
+  assert.equal(payload.run.completedAt, payload.run.createdAt);
+  assert.equal(payload.run.updatedAt, payload.run.createdAt);
+});
+
+test('project Agent runs persist lifecycle states and cancellation wins over late model completion', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const pendingResponse = fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validBody('__mock_delay__'))
+  });
+
+  await wait(40);
+  const inFlightList = await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`)).json();
+  const inFlightRun = inFlightList.runs[0];
+  assert.ok(inFlightRun);
+  assert.equal(inFlightRun.status, 'running');
+  assert.ok(inFlightRun.startedAt);
+
+  const cancelResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs/${encodeURIComponent(inFlightRun.runId)}/cancel`, { method: 'POST' });
+  assert.equal(cancelResponse.status, 200);
+  const cancelled = await cancelResponse.json();
+  assert.equal(cancelled.run.status, 'cancelled');
+  assert.equal(cancelled.run.errorCode, 'AGENT_CANCELLED');
+
+  const lateResponse = await pendingResponse;
+  assert.equal(lateResponse.status, 409);
+  const latePayload = await lateResponse.json();
+  assert.equal(latePayload.run.status, 'cancelled');
+  assert.equal(latePayload.run.output, null);
+
+  const detail = await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs/${encodeURIComponent(inFlightRun.runId)}`)).json();
+  assert.equal(detail.run.status, 'cancelled');
+  assert.equal(detail.run.output, null);
+
+  const failedResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validBody('__mock_invalid_json__'))
+  });
+  assert.equal(failedResponse.status, 502);
+  const failedPayload = await failedResponse.json();
+  assert.equal(failedPayload.run.status, 'failed');
+  assert.equal(failedPayload.run.errorCode, 'MODEL_INVALID_JSON');
+});
+
+test('concurrent completed description runs receive distinct draft versions', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const createRun = (note) => fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validBody(note))
+  });
+  const responses = await Promise.all([createRun('__mock_delay__'), createRun('__mock_delay__')]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [201, 201]);
+  const runs = (await Promise.all(responses.map((response) => response.json()))).map((payload) => payload.run);
+  assert.deepEqual(runs.map((run) => run.version).sort((a, b) => a - b), [1, 2]);
+  assert.deepEqual(runs.map((run) => run.output.version).sort((a, b) => a - b), [1, 2]);
+  const listed = await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`)).json();
+  assert.equal(listed.latestDraftVersion, 2);
 });
 
 test('project Agent fact warnings identify conflicts and clear after a user correction', async (t) => {

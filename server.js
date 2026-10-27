@@ -526,13 +526,13 @@ const callDeepSeek = (messages) => new Promise((resolve, reject) => {
   request.end();
 });
 
-const runAgentRequest = async (requestBody, { projectId = '' } = {}) => {
+const runAgentRequest = async (requestBody, { projectId = '', runId = '' } = {}) => {
   const validation = validateAgentInput({ ...requestBody, projectId: projectId || requestBody?.projectId || '' });
   if (!validation.ok) return { ok: false, statusCode: 400, errorCode: validation.code, error: validation.message };
   if (!deepseekApiKey) return { ok: false, statusCode: 503, errorCode: AGENT_ERROR_CODES.AGENT_NOT_CONFIGURED, error: 'DeepSeek 未配置，请检查服务端 API Key。', input: validation.value };
   try {
     const result = parseModelJson(await callDeepSeek(buildAgentMessages(validation.value)));
-    const output = normalizeAgentOutput(result, validation.value, { runId: createRunId() });
+    const output = normalizeAgentOutput(result, validation.value, { runId: runId || createRunId() });
     output.model = deepseekModel;
     if (validation.value.task === 'description_a' && !output.descriptionA) {
       return { ok: false, statusCode: 502, errorCode: AGENT_ERROR_CODES.MODEL_SCHEMA_INVALID, error: 'DeepSeek 未返回有效的 A 版草稿，请稍后重试。', input: validation.value, output };
@@ -565,7 +565,7 @@ const handleAgent = async (req, res) => {
 };
 
 const projectAgentCollectionMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/agent-runs(?:\?.*)?$/);
-const projectAgentItemMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/agent-runs\/([^/?]+)(?:\/(accept|restore))?(?:\?.*)?$/);
+const projectAgentItemMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/agent-runs\/([^/?]+)(?:\/(accept|restore|cancel))?(?:\?.*)?$/);
 
 const readProjectAgentState = (project) => {
   const agent = project?.agent && typeof project.agent === 'object' && !Array.isArray(project.agent) ? project.agent : {};
@@ -580,11 +580,24 @@ const readProjectAgentState = (project) => {
   };
 };
 
-const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft = false } = {}) => {
+const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft = false, allocateDraftVersion = false, rejectCancelled = false } = {}) => {
   const store = readProjectStore();
   const project = store[projectId];
   if (!project) return { ok: false, code: AGENT_ERROR_CODES.PROJECT_NOT_FOUND };
   const agent = readProjectAgentState(project);
+  const existingRun = agent.runs.find((item) => item.runId === run.runId);
+  if (rejectCancelled && existingRun?.status === 'cancelled' && run.status !== 'cancelled') {
+    return { ok: false, code: AGENT_ERROR_CODES.AGENT_CANCELLED, run: existingRun };
+  }
+  if (allocateDraftVersion && run.status === 'completed' && run.output?.draft) {
+    run.version = agent.latestDraftVersion + 1;
+    run.output.version = run.version;
+    Object.values(run.output.draft.fields || {}).forEach((field) => {
+      if (!field || typeof field !== 'object') return;
+      field.version = run.version;
+      field.updatedAt = run.updatedAt || nowIso();
+    });
+  }
   const nextRuns = [...agent.runs.filter((item) => item.runId !== run.runId), run].slice(-50);
   project.agent = {
     schemaVersion: 1,
@@ -602,7 +615,7 @@ const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft 
   store[projectId] = project;
   try {
     writeProjectStore(store);
-    return { ok: true, project };
+    return { ok: true, project, run };
   } catch (error) {
     console.error('[agent] failed to persist project run:', error.message);
     return { ok: false, code: AGENT_ERROR_CODES.PERSIST_FAILED };
@@ -675,6 +688,27 @@ const handleAgentRuns = async (req, res) => {
       sendJson(res, 200, { projectId, run });
       return;
     }
+    if (req.method === 'POST' && itemMatch[3] === 'cancel') {
+      if (run.status === 'cancelled') {
+        sendJson(res, 200, { projectId, run });
+        return;
+      }
+      if (!['queued', 'running'].includes(run.status)) {
+        sendJson(res, 409, { error: 'Only queued or running Agent runs can be cancelled.', errorCode: AGENT_ERROR_CODES.MODEL_SCHEMA_INVALID, run });
+        return;
+      }
+      const timestamp = nowIso();
+      run.status = 'cancelled';
+      run.cancelledAt = timestamp;
+      run.completedAt = timestamp;
+      run.errorCode = AGENT_ERROR_CODES.AGENT_CANCELLED;
+      run.errorMessage = 'Agent run cancelled by user.';
+      run.updatedAt = timestamp;
+      const persisted = persistProjectAgentRun(projectId, run);
+      if (!persisted.ok) { sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: persisted.code }); return; }
+      sendJson(res, 200, { projectId, run });
+      return;
+    }
     if (req.method === 'PATCH' && !itemMatch[3]) {
       const patch = await readJsonBody(req, res);
       if (!patch) return;
@@ -725,31 +759,76 @@ const handleAgentRuns = async (req, res) => {
   if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed.' }); return; }
   const requestBody = await readJsonBody(req, res);
   if (!requestBody) return;
-  const result = await runAgentRequest({ ...requestBody, projectId }, { projectId });
-  const runId = result.output?.runId || createRunId();
-  const hasDraft = Boolean(result.ok && result.input?.task === 'description_a' && result.output?.draft);
-  const version = hasDraft ? agent.latestDraftVersion + 1 : 0;
-  if (result.output && hasDraft) result.output.version = version;
-  const run = createAgentRunRecord({
+  const createdAt = nowIso();
+  const requestedInput = validateAgentInput({ ...requestBody, projectId });
+  const runId = createRunId();
+  const input = requestedInput.ok
+    ? requestedInput.value
+    : { task: String(requestBody.task || ''), projectId, product: {}, creativeDirection: { scene: '', note: '' }, conversation: [] };
+  const hasDraftTask = requestedInput.ok && requestedInput.value.task === 'description_a';
+  const version = 0;
+  const queuedRun = createAgentRunRecord({
     runId,
-    input: result.input || { task: String(requestBody.task || ''), projectId },
+    input,
+    status: requestedInput.ok ? 'queued' : 'failed',
+    errorCode: requestedInput.ok ? '' : requestedInput.code,
+    errorMessage: requestedInput.ok ? '' : requestedInput.message,
+    version,
+    createdAt,
+    completedAt: requestedInput.ok ? null : createdAt
+  });
+  const initialPersisted = persistProjectAgentRun(projectId, queuedRun, { isNewRun: true });
+  if (!initialPersisted.ok) {
+    sendJson(res, initialPersisted.code === AGENT_ERROR_CODES.PROJECT_NOT_FOUND ? 404 : 500, { error: 'Agent run could not be saved.', errorCode: initialPersisted.code });
+    return;
+  }
+  if (!requestedInput.ok) {
+    sendJson(res, 400, { error: requestedInput.message, errorCode: requestedInput.code, run: queuedRun });
+    return;
+  }
+
+  const runningTimestamp = nowIso();
+  const runningRun = { ...queuedRun, status: 'running', startedAt: runningTimestamp, updatedAt: runningTimestamp };
+  const runningPersisted = persistProjectAgentRun(projectId, runningRun);
+  if (!runningPersisted.ok) {
+    sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: runningPersisted.code });
+    return;
+  }
+
+  const result = await runAgentRequest({ ...requestBody, projectId }, { projectId, runId });
+  const latestStore = readProjectStore();
+  const latestProject = latestStore[projectId];
+  const latestAgent = readProjectAgentState(latestProject);
+  const latestRun = latestAgent.runs.find((item) => item.runId === runId);
+  if (latestRun?.status === 'cancelled') {
+    sendJson(res, 409, { error: 'Agent run was cancelled.', errorCode: AGENT_ERROR_CODES.AGENT_CANCELLED, run: latestRun });
+    return;
+  }
+  const finalRun = {
+    ...(latestRun || runningRun),
     output: result.output || null,
     status: result.ok ? 'completed' : 'failed',
     errorCode: result.errorCode || '',
     errorMessage: result.ok ? '' : result.error,
-    version,
-    createdAt: nowIso()
-  });
-  const persisted = persistProjectAgentRun(projectId, run, { isNewRun: true });
+    completedAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  const hasDraft = Boolean(result.ok && hasDraftTask && finalRun.output?.draft);
+  finalRun.version = 0;
+  const persisted = persistProjectAgentRun(projectId, finalRun, { allocateDraftVersion: hasDraft, rejectCancelled: true });
+  if (!persisted.ok && persisted.code === AGENT_ERROR_CODES.AGENT_CANCELLED) {
+    sendJson(res, 409, { error: 'Agent run was cancelled.', errorCode: AGENT_ERROR_CODES.AGENT_CANCELLED, run: persisted.run });
+    return;
+  }
   if (!persisted.ok) {
-    sendJson(res, persisted.code === AGENT_ERROR_CODES.PROJECT_NOT_FOUND ? 404 : 500, { error: 'Agent run could not be saved.', errorCode: persisted.code });
+    sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: persisted.code });
     return;
   }
   if (!result.ok) {
-    sendJson(res, result.statusCode, { error: result.error, errorCode: result.errorCode, run });
+    sendJson(res, result.statusCode, { error: result.error, errorCode: result.errorCode, run: finalRun });
     return;
   }
-  sendJson(res, 201, { projectId, run });
+  sendJson(res, 201, { projectId, run: persisted.run || finalRun });
 };
 
 const serveStatic = (req, res) => {
@@ -787,7 +866,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS' }); res.end(); return; }
   if (req.method === 'GET' && req.url === '/api/health') { sendJson(res, 200, { ok: true, provider: 'deepseek', configured: Boolean(deepseekApiKey), imageProvider: 'multi-platform-extension' }); return; }
   if (req.method === 'POST' && req.url === '/api/agent') { await handleAgent(req, res); return; }
-  if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }
+  if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore|cancel))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }
   if (/^\/(api\/projects\/[^/?]+\/generation-jobs)/.test(req.url)) { await handleGenerationJobs(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await handleAssetUpload(req, res); return; }
   if ((req.method === 'GET' || req.method === 'PUT') && /^\/api\/projects\//.test(req.url)) { await handleProject(req, res); return; }

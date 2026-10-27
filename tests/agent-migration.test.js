@@ -67,3 +67,41 @@ test('migrateFile creates a backup and leaves already migrated files unchanged',
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('migrateFile keeps the legacy file byte-identical when atomic rename fails', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-agent-migration-failure-'));
+  const projectsPath = path.join(tempDir, 'projects.json');
+  const original = JSON.stringify({ demo: legacyProject }, null, 2);
+  fs.writeFileSync(projectsPath, original, 'utf8');
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = (source, destination) => {
+      if (destination === projectsPath) throw new Error('injected atomic rename failure');
+      return originalRenameSync(source, destination);
+    };
+    assert.throws(() => migrateFile(projectsPath, { timestamp: '2026-10-27T00:00:00.000Z' }), /injected atomic rename failure/);
+    assert.equal(fs.readFileSync(projectsPath, 'utf8'), original);
+  } finally {
+    fs.renameSync = originalRenameSync;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('migrateFile keeps the legacy file byte-identical when the atomic temporary write fails', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-agent-migration-write-failure-'));
+  const projectsPath = path.join(tempDir, 'projects.json');
+  const original = JSON.stringify({ demo: legacyProject }, null, 2);
+  fs.writeFileSync(projectsPath, original, 'utf8');
+  const originalWriteFileSync = fs.writeFileSync;
+  try {
+    fs.writeFileSync = (destination, data, encoding) => {
+      if (destination === `${projectsPath}.tmp`) throw new Error('injected temporary write failure');
+      return originalWriteFileSync(destination, data, encoding);
+    };
+    assert.throws(() => migrateFile(projectsPath, { timestamp: '2026-10-27T00:00:00.000Z' }), /injected temporary write failure/);
+    assert.equal(fs.readFileSync(projectsPath, 'utf8'), original);
+  } finally {
+    fs.writeFileSync = originalWriteFileSync;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
