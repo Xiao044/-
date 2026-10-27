@@ -29,10 +29,11 @@ const port = Number(process.env.PORT || 5173);
 const deepseekApiKey = process.env.DEEPSEEK_API_KEY || '';
 const deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
 const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-const dataDir = path.join(root, 'data');
+const dataDir = path.resolve(process.env.ZAOTU_DATA_DIR || path.join(root, 'data'));
 const projectStorePath = path.join(dataDir, 'projects.json');
 const generationJobsPath = path.join(dataDir, 'generation-jobs.json');
 const uploadsDir = path.join(dataDir, 'uploads');
+const assetsDir = path.join(root, 'assets');
 const projectIdPattern = /^[A-Za-z0-9_\-\u4e00-\u9fff]{1,80}$/;
 const isValidProjectId = (value) => Boolean(value && projectIdPattern.test(value));
 
@@ -85,7 +86,12 @@ const readGenerationJobs = () => {
   try {
     if (!fs.existsSync(generationJobsPath)) return {};
     const parsed = JSON.parse(fs.readFileSync(generationJobsPath, 'utf8'));
-    return parsed && typeof parsed === 'object' ? normalizeGenerationJobs(parsed) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const normalized = normalizeGenerationJobs(parsed);
+    if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+      try { writeGenerationJobs(normalized); } catch (error) { console.error('[generation-jobs] failed to persist normalized store:', error.message); }
+    }
+    return normalized;
   } catch (error) {
     console.error('[generation-jobs] failed to read store:', error.message);
     return {};
@@ -165,7 +171,7 @@ const PLATFORM_TERMINAL_SUCCESS = new Set(['completed']);
 const PLATFORM_TERMINAL_FAILURE = new Set(['login_required', 'not_open', 'upload_error', 'submit_error', 'result_timeout', 'adapter_error', 'import_error', 'expired', 'failed']);
 const PLATFORM_TERMINAL_CANCELLED = new Set(['cancelled']);
 const PLATFORM_ACTIVE = new Set(['checking_login', 'page_opened', 'filling', 'submitted', 'generating', 'result_ready', 'running']);
-const PLATFORM_STATUSES = new Set(['queued', ...PLATFORM_ACTIVE, ...PLATFORM_TERMINAL_FAILURE, ...PLATFORM_TERMINAL_CANCELLED]);
+const PLATFORM_STATUSES = new Set(['queued', ...PLATFORM_ACTIVE, ...PLATFORM_TERMINAL_SUCCESS, ...PLATFORM_TERMINAL_FAILURE, ...PLATFORM_TERMINAL_CANCELLED]);
 const deriveGenerationJobStatus = (platforms) => {
   const entries = platforms && typeof platforms === 'object' && !Array.isArray(platforms)
     ? Object.values(platforms).filter((item) => item && typeof item === 'object')
@@ -174,11 +180,33 @@ const deriveGenerationJobStatus = (platforms) => {
   if (!statuses.length || statuses.every((status) => status === 'queued')) return 'queued';
   if (statuses.every((status) => PLATFORM_TERMINAL_SUCCESS.has(status))) return 'completed';
   if (statuses.every((status) => PLATFORM_TERMINAL_CANCELLED.has(status))) return 'cancelled';
-  if (statuses.every((status) => PLATFORM_TERMINAL_SUCCESS.has(status) || PLATFORM_TERMINAL_FAILURE.has(status) || PLATFORM_TERMINAL_CANCELLED.has(status))) {
-    return statuses.some((status) => PLATFORM_TERMINAL_FAILURE.has(status)) ? 'failed' : 'cancelled';
-  }
+  if (statuses.every((status) => status === 'expired')) return 'expired';
   if (statuses.some((status) => PLATFORM_ACTIVE.has(status)) || statuses.some((status) => status === 'queued')) return 'running';
+  if (statuses.every((status) => PLATFORM_TERMINAL_SUCCESS.has(status) || PLATFORM_TERMINAL_FAILURE.has(status) || PLATFORM_TERMINAL_CANCELLED.has(status))) {
+    return 'failed';
+  }
   return 'running';
+};
+
+const isPlatformTerminal = (status) => PLATFORM_TERMINAL_SUCCESS.has(status)
+  || PLATFORM_TERMINAL_FAILURE.has(status)
+  || PLATFORM_TERMINAL_CANCELLED.has(status);
+
+const expireGenerationJob = (job, timestamp = Date.now()) => {
+  if (!job || !job.expiresAt || !Number.isFinite(Date.parse(job.expiresAt)) || Date.parse(job.expiresAt) > timestamp) return false;
+  let changed = false;
+  Object.values(job.platforms || {}).forEach((entry) => {
+    if (!entry || isPlatformTerminal(entry.status)) return;
+    entry.status = 'expired';
+    entry.message = '该任务已过期';
+    entry.errorCode = 'expired';
+    entry.errorMessage = '该任务已过期';
+    entry.updatedAt = new Date(timestamp).toISOString();
+    changed = true;
+  });
+  if (changed) job.updatedAt = new Date(timestamp).toISOString();
+  job.status = deriveGenerationJobStatus(job.platforms);
+  return changed;
 };
 
 const normalizeResultReference = (result) => {
@@ -193,7 +221,8 @@ const normalizeResultReference = (result) => {
     candidateId: String(result.candidateId || id).slice(0, 120),
     url,
     sourceUrl: typeof result.sourceUrl === 'string' ? result.sourceUrl.slice(0, 2048) : url,
-    createdAt: String(result.createdAt || new Date().toISOString()).slice(0, 40)
+    createdAt: String(result.createdAt || result.savedAt || new Date().toISOString()).slice(0, 40),
+    ...(result.attemptId ? { attemptId: String(result.attemptId).slice(0, 160) } : {})
   };
 };
 
@@ -229,7 +258,7 @@ const normalizeGenerationJob = (job) => {
   const platforms = job.platforms && typeof job.platforms === 'object' && !Array.isArray(job.platforms)
     ? Object.fromEntries(Object.entries(job.platforms).map(([platform, entry]) => [platform, normalizePlatformEntry(entry, jobId, platform)]))
     : {};
-  return {
+  const normalized = {
     ...job,
     createdAt: job.createdAt || new Date().toISOString(),
     updatedAt: job.updatedAt || job.createdAt || new Date().toISOString(),
@@ -237,6 +266,9 @@ const normalizeGenerationJob = (job) => {
     platforms,
     status: deriveGenerationJobStatus(platforms)
   };
+  expireGenerationJob(normalized);
+  normalized.status = deriveGenerationJobStatus(normalized.platforms);
+  return normalized;
 };
 
 const normalizeGenerationJobs = (jobs) => {
@@ -244,7 +276,7 @@ const normalizeGenerationJobs = (jobs) => {
   return Object.fromEntries(Object.entries(jobs).map(([key, job]) => [key, normalizeGenerationJob(job)]));
 };
 
-const handleGenerationJobs = async (req, res) => {
+const handleGenerationJobsUnsafe = async (req, res) => {
   const collectionMatch = req.url.match(/^\/api\/projects\/([^/?]+)\/generation-jobs(?:\?.*)?$/);
   const itemMatch = req.url.match(/^\/api\/projects\/([^/?]+)\/generation-jobs\/([^/?]+)(?:\/platforms\/([^/?]+)(?:\/(retry|cancel|expire))?|\/(results)|\/(retry|cancel|expire))?(?:\?.*)?$/);
   const projectId = decodeURIComponent(collectionMatch?.[1] || itemMatch?.[1] || '');
@@ -318,6 +350,14 @@ const handleGenerationJobs = async (req, res) => {
   const resource = itemMatch[5] || '';
   const jobAction = itemMatch[6] || '';
 
+  const expiresAtMs = Date.parse(job.expiresAt || '');
+  if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now() && req.method !== 'GET') {
+    expireGenerationJob(job);
+    try { writeGenerationJobs(jobs); } catch { sendJson(res, 500, { error: 'Generation task could not be saved.' }); return; }
+    sendJson(res, 409, { error: 'Generation task has expired.', job });
+    return;
+  }
+
   if (!resource && req.method === 'GET') { sendJson(res, 200, { job }); return; }
   const now = () => new Date().toISOString();
   const snapshotAttempt = (entry) => ({
@@ -368,6 +408,12 @@ const handleGenerationJobs = async (req, res) => {
   if (platformAction && req.method === 'POST') {
     const entry = job.platforms[platform];
     if (!entry) { sendJson(res, 404, { error: 'Platform task not found.' }); return; }
+    const input = await readJsonBody(req, res);
+    if (!input) return;
+    if (String(input.jobId || '') !== jobId || String(input.platform || '').toLowerCase() !== platform || !input.attemptId || String(input.attemptId) !== entry.attemptId) {
+      sendJson(res, 409, { error: 'Mismatched or stale platform attempt.' });
+      return;
+    }
     if (platformAction === 'retry') {
       if (entry.status === 'completed') { sendJson(res, 409, { error: 'Completed platform tasks cannot be retried.' }); return; }
       resetPlatformForRetry(entry, platform);
@@ -375,11 +421,13 @@ const handleGenerationJobs = async (req, res) => {
       return;
     }
     if (platformAction === 'cancel') {
+      if (isPlatformTerminal(entry.status) && entry.status !== 'cancelled') { sendJson(res, 409, { error: 'Terminal platform task cannot be cancelled.' }); return; }
       setPlatformTerminal(entry, 'cancelled', '已取消该平台任务');
       persistJob(200, { platform });
       return;
     }
     if (platformAction === 'expire') {
+      if (isPlatformTerminal(entry.status) && entry.status !== 'expired') { sendJson(res, 409, { error: 'Terminal platform task cannot be expired.' }); return; }
       setPlatformTerminal(entry, 'expired', '该平台任务已过期');
       persistJob(200, { platform });
       return;
@@ -390,7 +438,7 @@ const handleGenerationJobs = async (req, res) => {
     const message = jobAction === 'cancel' ? '任务已取消' : '任务已过期';
     const status = jobAction === 'cancel' ? 'cancelled' : 'expired';
     Object.values(job.platforms).forEach((entry) => {
-      if (!PLATFORM_TERMINAL_SUCCESS.has(entry.status) && !PLATFORM_TERMINAL_FAILURE.has(entry.status)) setPlatformTerminal(entry, status, message);
+      if (!isPlatformTerminal(entry.status)) setPlatformTerminal(entry, status, message);
     });
     persistJob(200, { action: jobAction });
     return;
@@ -401,8 +449,10 @@ const handleGenerationJobs = async (req, res) => {
     if (!entry) { sendJson(res, 404, { error: 'Platform task not found.' }); return; }
     const input = await readJsonBody(req, res);
     if (!input) return;
+    if (String(input.jobId || '') !== jobId || String(input.platform || '').toLowerCase() !== platform) { sendJson(res, 409, { error: 'Mismatched generation job or platform.' }); return; }
     if (input.status && !PLATFORM_STATUSES.has(input.status)) { sendJson(res, 400, { error: 'Invalid platform task status.' }); return; }
-    if (input.attemptId && input.attemptId !== entry.attemptId) { sendJson(res, 409, { error: 'Stale platform attempt.' }); return; }
+    if (!input.attemptId || String(input.attemptId) !== entry.attemptId) { sendJson(res, 409, { error: 'Stale platform attempt.' }); return; }
+    if (isPlatformTerminal(entry.status) && input.status && input.status !== entry.status) { sendJson(res, 409, { error: 'Terminal platform attempt cannot regress.' }); return; }
     if (input.status) entry.status = input.status;
     if (typeof input.message === 'string') entry.message = input.message.slice(0, 1000);
     if (typeof input.errorCode === 'string') entry.errorCode = input.errorCode.slice(0, 120);
@@ -424,21 +474,33 @@ const handleGenerationJobs = async (req, res) => {
     if (!input) return;
     const platform = String(input.platform || '').toLowerCase();
     if (!job.platforms[platform]) { sendJson(res, 400, { error: 'Platform is not part of this task.' }); return; }
+    if (String(input.jobId || '') !== jobId) { sendJson(res, 409, { error: 'Mismatched generation job.' }); return; }
+    const entry = job.platforms[platform];
+    if (!input.attemptId || String(input.attemptId) !== entry.attemptId) { sendJson(res, 409, { error: 'Stale platform attempt.' }); return; }
     const assetUrl = String(input.assetUrl || '');
     if (!assetUrl.startsWith(`/uploads/${encodeURIComponent(projectId)}/`) || assetUrl.includes('..')) {
       sendJson(res, 400, { error: 'Result image must be uploaded to this project first.' });
       return;
     }
     const saved = { id: String(input.id || input.candidateId || '').slice(0, 120), candidateId: String(input.candidateId || input.id || '').slice(0, 120), url: assetUrl, platform, savedAt: now() };
-    job.platforms[platform].savedResults.push(saved);
-    job.platforms[platform].status = 'completed';
-    job.platforms[platform].updatedAt = now();
-    job.platforms[platform].errorCode = '';
-    job.platforms[platform].errorMessage = '';
+    saved.attemptId = entry.attemptId;
+    entry.savedResults = [...entry.savedResults, saved].slice(-12);
+    entry.status = 'completed';
+    entry.updatedAt = now();
+    entry.errorCode = '';
+    entry.errorMessage = '';
     persistJob(201, { result: saved });
     return;
   }
   sendJson(res, 405, { error: 'Method not allowed.' });
+};
+
+let generationJobsMutationTail = Promise.resolve();
+const handleGenerationJobs = (req, res) => {
+  if (req.method === 'GET') return handleGenerationJobsUnsafe(req, res);
+  const run = generationJobsMutationTail.then(() => handleGenerationJobsUnsafe(req, res));
+  generationJobsMutationTail = run.catch(() => {});
+  return run;
 };
 
 const readBinaryBody = (req, maxBytes = 8 * 1024 * 1024) => new Promise((resolve, reject) => {
@@ -832,7 +894,8 @@ const handleAgentRuns = async (req, res) => {
 };
 
 const serveStatic = (req, res) => {
-  const urlPath = decodeURIComponent(req.url.split('?')[0]);
+  let urlPath;
+  try { urlPath = decodeURIComponent(req.url.split('?')[0]); } catch { res.writeHead(404); res.end('Not found'); return; }
   if (urlPath.startsWith('/uploads/')) {
     const relativeUploadPath = path.relative(uploadsDir, path.resolve(uploadsDir, `.${urlPath.slice('/uploads'.length)}`));
     if (relativeUploadPath.startsWith('..') || path.isAbsolute(relativeUploadPath)) { res.writeHead(404); res.end('Not found'); return; }
@@ -850,8 +913,10 @@ const serveStatic = (req, res) => {
     return;
   }
   const requested = urlPath === '/' ? '/index.html' : urlPath;
-  const filePath = path.resolve(root, `.${requested}`);
-  const relativePath = path.relative(root, filePath);
+  const baseRoot = isAssetPath ? assetsDir : root;
+  const assetRequested = isAssetPath ? requested.slice('/assets'.length) || '/' : requested;
+  const filePath = path.resolve(baseRoot, `.${assetRequested}`);
+  const relativePath = path.relative(baseRoot, filePath);
   if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not found');

@@ -11,27 +11,27 @@ window.addEventListener('message', (event) => {
         else if (!response.ok) reject(Object.assign(new Error(response.message || `无法连接${platform}页面。`), { needsPage: response.needsPage || false }));
         else resolve(response);
       });
-    }).then((response) => post('PLATFORM_OPENED', { platform, tabId: response.tabId }))
-      .catch((error) => post('PLATFORM_ERROR', { platform, needsPage: Boolean(error.needsPage), message: error.message || `${platform} 页面连接失败。` }));
+    }).then((response) => post('PLATFORM_OPENED', { platform, jobId: event.data.payload?.jobId, attemptId: event.data.payload?.attemptId, tabId: response.tabId }))
+      .catch((error) => post('PLATFORM_ERROR', { platform, jobId: event.data.payload?.jobId, attemptId: event.data.payload?.attemptId, needsPage: Boolean(error.needsPage), message: error.message || `${platform} 页面连接失败。` }));
   }
   if (event.data.type === 'DOUBAO_OPEN_PAGE' || event.data.type === 'OPEN_PLATFORM') {
     const platform = event.data.platform || 'doubao';
     chrome.runtime.sendMessage({ type: platform === 'doubao' ? 'ZAOTU_OPEN_DOUBAO' : 'ZAOTU_OPEN_PLATFORM', platform }, (response) => {
-      if (chrome.runtime.lastError || !response?.ok) post('PLATFORM_ERROR', { platform, message: response?.message || chrome.runtime.lastError?.message || `无法打开${platform}。` });
+      if (chrome.runtime.lastError || !response?.ok) post('PLATFORM_ERROR', { platform, openEvent: true, message: response?.message || chrome.runtime.lastError?.message || `无法打开${platform}。` });
       else post('PLATFORM_PAGE_OPENED', { platform, tabId: response.tabId });
     });
   }
   if (event.data.type === 'DOUBAO_IMPORT_SELECTED' || event.data.type === 'IMPORT_SELECTED') {
     const platform = event.data.platform || event.data.result?.platform || 'doubao';
     chrome.runtime.sendMessage({ type: 'ZAOTU_IMPORT_SELECTED', platform, result: event.data.result }, (response) => {
-      if (chrome.runtime.lastError || !response?.ok) post('PLATFORM_STATUS', { platform, jobId: event.data.result?.jobId, state: 'import_error', message: response?.message || chrome.runtime.lastError?.message || '结果图片读取失败。' });
-      else post('PLATFORM_IMPORTED', { platform, result: response.result });
+      if (chrome.runtime.lastError || !response?.ok) post('PLATFORM_STATUS', { platform, jobId: event.data.result?.jobId, attemptId: event.data.result?.attemptId, state: 'import_error', message: response?.message || chrome.runtime.lastError?.message || '结果图片读取失败。' });
+      else post('PLATFORM_IMPORTED', { platform, result: { ...response.result, jobId: event.data.result?.jobId, attemptId: event.data.result?.attemptId } });
     });
   }
   if (event.data.type === 'PLATFORM_CANCEL' || event.data.type === 'CANCEL_PLATFORM_JOB') {
     const platform = event.data.platform || 'doubao';
-    chrome.runtime.sendMessage({ type: 'ZAOTU_CANCEL_PLATFORM_JOB', platform, jobId: event.data.jobId }, (response) => {
-      if (chrome.runtime.lastError || !response?.ok) post('PLATFORM_ERROR', { platform, jobId: event.data.jobId, message: response?.message || chrome.runtime.lastError?.message || '取消平台任务失败。' });
+    chrome.runtime.sendMessage({ type: 'ZAOTU_CANCEL_PLATFORM_JOB', platform, jobId: event.data.jobId, attemptId: event.data.attemptId }, (response) => {
+      if (chrome.runtime.lastError || !response?.ok) post('PLATFORM_ERROR', { platform, jobId: event.data.jobId, attemptId: event.data.attemptId, needsPage: false, message: response?.message || chrome.runtime.lastError?.message || '取消平台任务失败。' });
     });
   }
 });

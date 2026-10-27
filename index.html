@@ -218,9 +218,11 @@
       let doubaoExtensionReady = false;
       let doubaoAttemptId = 0;
       const platformOpenTimers = new Map();
-      const generationPlatforms = { chatgpt: { label: 'ChatGPT', state: 'idle', message: '' }, gemini: { label: 'Gemini', state: 'idle', message: '' }, lovart: { label: 'Lovart', state: 'idle', message: '' }, doubao: { label: '豆包', state: 'idle', message: '' } };
+      const generationPlatforms = { chatgpt: { label: 'ChatGPT', state: 'idle', message: '', attemptId: '' }, gemini: { label: 'Gemini', state: 'idle', message: '', attemptId: '' }, lovart: { label: 'Lovart', state: 'idle', message: '', attemptId: '' }, doubao: { label: '豆包', state: 'idle', message: '', attemptId: '' } };
       let generationJobId = '';
       let generationResendSourceJobId = '';
+      const generationStatusSyncTimers = new Map();
+      const generationStatusSyncPending = new Map();
       let productState = { name: '春日珍珠项链', subtitle: '温润珠光 · 轻盈日常', description: '希望画面自然、干净，有春天的轻盈感，让商品成为视觉中心。', imageUrl: './assets/pearl-necklace.svg' };
       let versions = [];
       let projectName = '珍珠项链 · 春日上新';
@@ -813,7 +815,7 @@
         generationJobId = '';
         selectedGenerationPlatforms = new Set(['doubao']);
         doubaoBridgeState = 'idle';
-        Object.values(generationPlatforms).forEach((platform) => { platform.state = 'idle'; platform.message = ''; });
+        Object.values(generationPlatforms).forEach((platform) => { platform.state = 'idle'; platform.message = ''; platform.attemptId = ''; });
         sceneOptions.forEach((option, index) => {
           option.classList.toggle('selected', index === 0);
           option.setAttribute('aria-pressed', index === 0 ? 'true' : 'false');
@@ -921,7 +923,7 @@
           generationJobId = '';
           doubaoBridgeState = 'idle';
           doubaoAttemptId += 1;
-          Object.values(generationPlatforms).forEach((platform) => { platform.state = 'idle'; platform.message = ''; });
+          Object.values(generationPlatforms).forEach((platform) => { platform.state = 'idle'; platform.message = ''; platform.attemptId = ''; });
         }
         for (let index = stepIndex + 1; index < flowSteps.length; index += 1) resetFlowStep(index);
         if (stepIndex === 0) {
@@ -1068,7 +1070,7 @@
           return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : '';
         } catch { return ''; }
       };
-      const normalizeResult = (result, platform, jobId = generationJobId) => {
+      const normalizeResult = (result, platform, jobId = generationJobId, attemptId = '') => {
         if (!result || typeof result !== 'object') return null;
         const url = normalizeResultUrl(result.url || result.imageUrl);
         if (!url) return null;
@@ -1077,14 +1079,27 @@
           id: String(result.id || url.slice(0, 120)),
           url,
           platform: platform || result.platform || 'doubao',
-          jobId: result.jobId || jobId || ''
+          jobId: result.jobId || jobId || '',
+          ...((result.attemptId || attemptId) ? { attemptId: String(result.attemptId || attemptId) } : {})
         };
       };
       const resultKey = (result) => `${result.platform || 'unknown'}|${result.jobId || ''}|${result.url}`;
-      const isCurrentResultMessage = (message) => !invalidatedGenerationJobs.has(message.jobId) && (!message.jobId || !generationJobId || message.jobId === generationJobId);
-      const mergePlatformResults = (platform, results, jobId = generationJobId) => {
+      const isCurrentResultMessage = (message) => {
+        if (invalidatedGenerationJobs.has(message.jobId) || (message.jobId && generationJobId && message.jobId !== generationJobId)) return false;
+        const platform = generationPlatforms[message.platform];
+        return !message.attemptId || !platform?.attemptId || message.attemptId === platform.attemptId;
+      };
+      const resetPlatformCandidatesForAttempt = (platform, jobId, attemptId) => {
+        if (!platform || !attemptId) return;
+        const selectedKey = resultSelected >= 0 ? resultKey(generatedResults[resultSelected]) : '';
+        generatedResults = generatedResults.filter((result) => result.sourceUrl === 'manual-upload'
+          || result.platform !== platform
+          || (result.jobId === jobId && result.attemptId === attemptId));
+        resultSelected = selectedKey ? generatedResults.findIndex((result) => resultKey(result) === selectedKey) : -1;
+      };
+      const mergePlatformResults = (platform, results, jobId = generationJobId, attemptId = '') => {
         const normalized = (Array.isArray(results) ? results : [])
-          .map((result) => normalizeResult(result, platform, jobId))
+          .map((result) => normalizeResult(result, platform, jobId, attemptId))
           .filter(Boolean);
         if (!normalized.length) return [];
         const existingKeys = new Set(generatedResults.map((result) => resultKey(result)));
@@ -1092,7 +1107,7 @@
         const selectedKey = selectedResult ? resultKey(selectedResult) : '';
         const retained = generatedResults.filter((result) => result.sourceUrl === 'manual-upload'
           || result.platform !== platform
-          || (result.jobId && result.jobId === jobId));
+          || (result.jobId && result.jobId === jobId && (!attemptId || result.attemptId === attemptId)));
         const merged = new Map();
         [...retained, ...normalized].forEach((result) => {
           const key = resultKey(result);
@@ -1341,9 +1356,15 @@
         if (!job || job.jobId !== generationJobId) return;
         Object.entries(job.platforms || {}).forEach(([key, item]) => {
           if (!generationPlatforms[key]) return;
+          generationPlatforms[key].attemptId = item.attemptId || generationPlatforms[key].attemptId || '';
           generationPlatforms[key].state = item.status || 'idle';
           generationPlatforms[key].message = item.errorMessage || item.message || '';
-          if (Array.isArray(item.results) && item.results.length) mergePlatformResults(key, item.results, job.jobId);
+          resetPlatformCandidatesForAttempt(key, job.jobId, item.attemptId || generationPlatforms[key].attemptId);
+          if (Array.isArray(item.results) && item.results.length) mergePlatformResults(key, item.results, job.jobId, item.attemptId);
+          if (Array.isArray(item.savedResults) && item.savedResults.length) {
+            const currentSavedResults = item.savedResults.filter((result) => !result.attemptId || result.attemptId === item.attemptId);
+            mergePlatformResults(key, currentSavedResults.map((result) => ({ ...result, saved: true, jobRecorded: true, attemptId: result.attemptId || item.attemptId })), job.jobId, item.attemptId);
+          }
         });
         renderPlatformStatuses();
         renderResults();
@@ -1355,7 +1376,14 @@
           ? `${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}/platforms/${encodeURIComponent(platform)}/${action}`
           : `${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}/${action === 'cancel-job' ? 'cancel' : action}`;
         try {
-          const response = await fetch(endpoint, { method: 'POST' });
+          let actionBody = {};
+          if (platform) {
+            const selectedTask = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+            const selectedPayload = await selectedTask.json().catch(() => ({}));
+            const entry = selectedPayload.job?.platforms?.[platform];
+            actionBody = { jobId, platform, attemptId: entry?.attemptId || '' };
+          }
+          const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actionBody) });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload.error || '任务操作失败');
           if (payload.job) {
@@ -1573,7 +1601,7 @@
         const action = detailContent.querySelector('[data-detail-action]');
         doubaoBridgeState = 'preparing';
         const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
-        platforms.forEach((platform) => { generationPlatforms[platform].state = 'queued'; generationPlatforms[platform].message = '等待平台响应'; });
+        platforms.forEach((platform) => { generationPlatforms[platform].state = 'queued'; generationPlatforms[platform].message = '等待平台响应'; generationPlatforms[platform].attemptId = ''; });
         renderPlatformStatuses();
         if (bridgeStatus) bridgeStatus.textContent = '正在分别连接所选平台…';
         if (action) { action.disabled = true; action.textContent = '正在发送到所选平台'; action.insertAdjacentHTML('beforeend', '<span class="button-spinner" aria-hidden="true"></span>'); }
@@ -1587,6 +1615,9 @@
           if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
           generationJobId = payload.job.jobId;
           generationResendSourceJobId = '';
+          platforms.forEach((platform) => {
+            generationPlatforms[platform].attemptId = payload.job.platforms?.[platform]?.attemptId || '';
+          });
           persistState();
           platforms.forEach((platform) => {
             window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
@@ -1691,7 +1722,7 @@
           const record = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/results`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ platform: result.platform || 'doubao', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname })
+            body: JSON.stringify({ jobId: generationJobId, platform: result.platform || 'doubao', attemptId: result.attemptId || generationPlatforms[result.platform || 'doubao']?.attemptId || '', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname })
           });
           const payload = await record.json().catch(() => ({}));
           if (!record.ok) throw new Error(payload.error || '结果记录保存失败。');
@@ -1713,14 +1744,25 @@
       };
       const syncGenerationStatus = (status, message, results, platform = 'doubao', meta = {}) => {
         if (!generationJobId) return;
+        const attemptId = meta.attemptId || generationPlatforms[platform]?.attemptId || '';
+        if (!attemptId) return;
         const resultRefs = Array.isArray(results)
           ? results.map((result) => ({ id: result.id, url: /^https?:\/\//.test(result.url || '') ? result.url : '' })).filter((result) => result.url)
           : undefined;
-        fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/platforms/${encodeURIComponent(platform)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status, message, ...(meta.attemptId ? { attemptId: meta.attemptId } : {}), ...(meta.errorCode ? { errorCode: meta.errorCode, errorMessage: message } : {}), ...(resultRefs?.length ? { results: resultRefs } : {}) })
-        }).catch(() => {});
+        const key = `${generationJobId}:${platform}:${attemptId}`;
+        generationStatusSyncPending.set(key, { jobId: generationJobId, platform, status, message, attemptId, ...(meta.errorCode ? { errorCode: meta.errorCode, errorMessage: message } : {}), ...(resultRefs?.length ? { results: resultRefs } : {}) });
+        if (generationStatusSyncTimers.has(key)) return;
+        generationStatusSyncTimers.set(key, window.setTimeout(() => {
+          generationStatusSyncTimers.delete(key);
+          const payload = generationStatusSyncPending.get(key);
+          generationStatusSyncPending.delete(key);
+          if (!payload || payload.jobId !== generationJobId || generationPlatforms[payload.platform]?.attemptId !== payload.attemptId) return;
+          fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(payload.jobId)}/platforms/${encodeURIComponent(payload.platform)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }).catch(() => {});
+        }, 80));
       };
       const importResult = () => {
         if (resultSelected < 0) {
@@ -1831,7 +1873,16 @@
       window.addEventListener('message', (event) => {
         if (event.source !== window || event.data?.source !== 'zaotu-doubao-extension') return;
         const message = event.data;
+        const taskMessageTypes = new Set(['PLATFORM_STATUS', 'PLATFORM_RESULT_CANDIDATES', 'PLATFORM_ERROR', 'DOUBAO_STATUS', 'DOUBAO_ERROR', 'DOUBAO_RESULT_CANDIDATES']);
+        if (taskMessageTypes.has(message.type) && !message.openEvent && (!message.jobId || !message.attemptId)) return;
+        if (['PLATFORM_IMPORTED', 'DOUBAO_IMPORTED', 'DOUBAO_IMPORTED_RESULT'].includes(message.type)
+          && (!message.result?.jobId || !message.result?.attemptId)) return;
         if (message.jobId && invalidatedGenerationJobs.has(message.jobId)) return;
+        const messagePlatform = message.platform ? generationPlatforms[message.platform] : null;
+        if (messagePlatform && message.attemptId) {
+          if (messagePlatform.attemptId && messagePlatform.attemptId !== message.attemptId) return;
+          messagePlatform.attemptId = message.attemptId;
+        }
         const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
         const action = detailContent.querySelector('[data-detail-action]');
         if (message.type === 'DOUBAO_EXTENSION_READY') {
@@ -1847,7 +1898,7 @@
           renderPlatformStatuses();
           syncGenerationStatus(platform.state, platform.message, message.results, message.platform, message);
           if (message.results?.length && isCurrentResultMessage(message)) {
-            const candidates = mergePlatformResults(message.platform, message.results, message.jobId);
+            const candidates = mergePlatformResults(message.platform, message.results, message.jobId, message.attemptId);
             if (candidates.length) {
               resultGenerated = true;
               persistState(); syncProject(); renderResults();
@@ -1872,7 +1923,7 @@
         if (message.type === 'PLATFORM_RESULT_CANDIDATES') {
           const platform = generationPlatforms[message.platform];
           if (!platform || !isCurrentResultMessage(message)) return;
-          const candidates = mergePlatformResults(message.platform, message.results, message.jobId);
+          const candidates = mergePlatformResults(message.platform, message.results, message.jobId, message.attemptId);
           if (!candidates.length) return;
           resultGenerated = true; platform.state = 'result_ready'; platform.message = `${candidates.length} 张新结果待选择`;
            syncGenerationStatus('result_ready', platform.message, candidates, message.platform, message);
@@ -1929,7 +1980,7 @@
         }
         if (message.type === 'DOUBAO_RESULT_CANDIDATES') {
           if (!isCurrentResultMessage(message)) return;
-          const candidates = mergePlatformResults('doubao', message.results, message.jobId);
+          const candidates = mergePlatformResults('doubao', message.results, message.jobId, message.attemptId);
           if (!candidates.length) return;
           const doubao = generationPlatforms.doubao;
           doubao.state = 'result_ready';
