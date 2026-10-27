@@ -11,10 +11,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'ZAOTU_CANCEL_PLATFORM_JOB' || message.platform !== PLATFORM) return;
-  if (!message.jobId || message.jobId === window.__zaotuJobId) {
-    ZaotuPlatform.cancel();
+  if (message.jobId && message.attemptId && message.jobId === window.__zaotuJobId && message.attemptId === window.__zaotuAttemptId) {
+    const cancelled = ZaotuPlatform.cancel('cancelled', message.jobId, message.attemptId);
+    if (!cancelled.ok) { sendResponse({ ok: false, message: '取消任务的 jobId 或 attemptId 不匹配。' }); return false; }
     postStatus('cancelled', '已取消 Gemini 当前任务。', undefined, 'CANCELLED');
     sendResponse({ ok: true, state: 'cancelled' });
+  } else {
+    sendResponse({ ok: false, message: '取消任务的 jobId 或 attemptId 不匹配。' });
   }
   return false;
 });

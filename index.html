@@ -220,6 +220,7 @@
       const platformOpenTimers = new Map();
       const generationPlatforms = { chatgpt: { label: 'ChatGPT', state: 'idle', message: '', attemptId: '' }, gemini: { label: 'Gemini', state: 'idle', message: '', attemptId: '' }, lovart: { label: 'Lovart', state: 'idle', message: '', attemptId: '' }, doubao: { label: '豆包', state: 'idle', message: '', attemptId: '' } };
       let generationJobId = '';
+      let generationRequestKey = '';
       let generationResendSourceJobId = '';
       const generationStatusSyncTimers = new Map();
       const generationStatusSyncPending = new Map();
@@ -1206,7 +1207,7 @@
         queued: '排队中', running: '运行中', completed: '已完成', failed: '部分失败', cancelled: '已取消', expired: '已过期',
         checking_login: '检查登录', page_opened: '页面已打开', filling: '填写中', submitted: '已提交', generating: '生成中',
         result_ready: '结果待选', login_required: '需要登录', not_open: '页面未打开', upload_error: '上传失败', submit_error: '提交失败',
-        result_timeout: '结果超时', adapter_error: '适配失败', import_error: '归档失败'
+        result_timeout: '结果超时', extension_disconnected: '扩展已断开', adapter_error: '适配失败', import_error: '归档失败'
       };
       const taskStatusLabel = (status) => taskStatusLabels[status] || status || '未知';
       const taskTime = (value) => {
@@ -1580,6 +1581,7 @@
         resultGenerated = false;
         resultSelected = -1;
         generationJobId = '';
+        generationRequestKey = '';
         doubaoBridgeState = 'idle';
         persistState();
         renderResults();
@@ -1588,6 +1590,7 @@
       const generateResults = async () => {
         if (agentBusy || interrupted) return;
         const attemptId = ++doubaoAttemptId;
+        if (!generationRequestKey) generationRequestKey = window.crypto?.randomUUID?.() || `generation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
         const platforms = [...selectedGenerationPlatforms];
         if (!platforms.length) { showToast('请至少选择一个生图平台'); return; }
         const sourceImageUrl = aReferenceImageUrl || productState.imageUrl;
@@ -1608,12 +1611,13 @@
         try {
           const response = await fetch(`${projectApiUrl}/generation-jobs`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ platforms, prompt: promptB, ...(imageUrlAbsolute ? { productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
+            headers: { 'Content-Type': 'application/json', 'Idempotency-Key': generationRequestKey },
+            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, ...(imageUrlAbsolute ? { productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
           generationJobId = payload.job.jobId;
+          generationRequestKey = '';
           generationResendSourceJobId = '';
           platforms.forEach((platform) => {
             generationPlatforms[platform].attemptId = payload.job.platforms?.[platform]?.attemptId || '';
@@ -1912,7 +1916,7 @@
         if (message.type === 'PLATFORM_ERROR') {
           const platform = generationPlatforms[message.platform];
           if (!platform) return;
-          platform.state = message.needsPage ? 'not_open' : 'failed';
+          platform.state = message.state || (message.needsPage ? 'not_open' : 'extension_disconnected');
           platform.message = message.message || `${platform.label}连接失败`;
           renderPlatformStatuses();
           syncGenerationStatus(platform.state, platform.message, undefined, message.platform, message);

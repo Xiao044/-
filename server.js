@@ -57,7 +57,7 @@ const sendJson = (res, statusCode, payload) => {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS'
   });
   res.end(body);
@@ -168,7 +168,7 @@ const readJsonBody = async (req, res) => {
 };
 
 const PLATFORM_TERMINAL_SUCCESS = new Set(['completed']);
-const PLATFORM_TERMINAL_FAILURE = new Set(['login_required', 'not_open', 'upload_error', 'submit_error', 'result_timeout', 'adapter_error', 'import_error', 'expired', 'failed']);
+const PLATFORM_TERMINAL_FAILURE = new Set(['login_required', 'not_open', 'extension_disconnected', 'upload_error', 'submit_error', 'result_timeout', 'adapter_error', 'import_error', 'expired', 'failed']);
 const PLATFORM_TERMINAL_CANCELLED = new Set(['cancelled']);
 const PLATFORM_ACTIVE = new Set(['checking_login', 'page_opened', 'filling', 'submitted', 'generating', 'result_ready', 'running']);
 const PLATFORM_STATUSES = new Set(['queued', ...PLATFORM_ACTIVE, ...PLATFORM_TERMINAL_SUCCESS, ...PLATFORM_TERMINAL_FAILURE, ...PLATFORM_TERMINAL_CANCELLED]);
@@ -238,7 +238,7 @@ const normalizePlatformEntry = (entry, jobId, platform) => {
     ...source,
     status,
     message: String(source.message || '').slice(0, 1000),
-    errorCode: String(source.errorCode || '').slice(0, 120),
+    errorCode: String(source.errorCode || (status === 'extension_disconnected' ? 'EXTENSION_DISCONNECTED' : '')).slice(0, 120),
     errorMessage: String(source.errorMessage || source.message || '').slice(0, 1000),
     attemptId,
     attemptCount,
@@ -296,6 +296,12 @@ const handleGenerationJobsUnsafe = async (req, res) => {
       sendJson(res, 400, { error: 'A prompt of up to 12000 characters is required.' });
       return;
     }
+    const rawIdempotencyKey = req.headers['idempotency-key'] || input.idempotencyKey || input.requestId || '';
+    const idempotencyKey = String(rawIdempotencyKey || '').trim().slice(0, 200);
+    if (idempotencyKey) {
+      const existing = Object.values(jobs).find((candidate) => candidate && candidate.projectId === projectId && candidate.idempotencyKey === idempotencyKey);
+      if (existing) { sendJson(res, 200, { job: existing, idempotent: true }); return; }
+    }
     const now = new Date().toISOString();
     const jobId = `gen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const job = {
@@ -305,6 +311,7 @@ const handleGenerationJobsUnsafe = async (req, res) => {
       productImageUrl: typeof input.productImageUrl === 'string' ? input.productImageUrl.slice(0, 2048) : '',
       sourceJobId: typeof input.sourceJobId === 'string' ? input.sourceJobId.slice(0, 120) : '',
       resendType: typeof input.resendType === 'string' ? input.resendType.slice(0, 40) : '',
+      ...(idempotencyKey ? { idempotencyKey } : {}),
       createdAt: now,
       updatedAt: now,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
@@ -928,7 +935,7 @@ const serveStatic = (req, res) => {
 };
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS' }); res.end(); return; }
+  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS' }); res.end(); return; }
   if (req.method === 'GET' && req.url === '/api/health') { sendJson(res, 200, { ok: true, provider: 'deepseek', configured: Boolean(deepseekApiKey), imageProvider: 'multi-platform-extension' }); return; }
   if (req.method === 'POST' && req.url === '/api/agent') { await handleAgent(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore|cancel))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }

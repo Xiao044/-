@@ -3,7 +3,7 @@ let activeDoubaoJobId = '';
 let activeDoubaoAttemptId = '';
 let activeMonitorTimer = null;
 const DOUBAO_ERROR_CODES = { login_required: 'LOGIN_REQUIRED', upload_error: 'UPLOAD_FAILED', submit_error: 'SUBMIT_FAILED', result_timeout: 'RESULT_TIMEOUT', adapter_error: 'ADAPTER_ERROR', cancelled: 'CANCELLED', failed: 'PLATFORM_FAILED' };
-const sendStatus = (state, message, jobId = activeDoubaoJobId, errorCode = DOUBAO_ERROR_CODES[state] || '') => chrome.runtime.sendMessage({ type: 'ZAOTU_STATUS', platform: 'doubao', jobId, attemptId: activeDoubaoAttemptId, timestamp: new Date().toISOString(), state, message, errorCode });
+const sendStatus = (state, message, jobId = activeDoubaoJobId, errorCode = DOUBAO_ERROR_CODES[state] || '') => { const payload = { type: 'ZAOTU_STATUS', platform: 'doubao', jobId, attemptId: activeDoubaoAttemptId, state, message, errorCode }; chrome.runtime.sendMessage(typeof ZaotuProtocol !== 'undefined' ? ZaotuProtocol.normalizeEvent(payload) : { ...payload, timestamp: new Date().toISOString() }); };
 
 const isDisabled = (element) => Boolean(
   element?.disabled
@@ -272,13 +272,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'ZAOTU_CANCEL_PLATFORM_JOB' || message.platform !== 'doubao') return;
-  if (!message.jobId || message.jobId === activeDoubaoJobId) {
+  if (message.jobId && message.attemptId && message.jobId === activeDoubaoJobId && message.attemptId === activeDoubaoAttemptId) {
     if (activeMonitorTimer) clearInterval(activeMonitorTimer);
     activeMonitorTimer = null;
     sendStatus('cancelled', '已取消豆包当前任务。');
     activeDoubaoJobId = '';
     activeDoubaoAttemptId = '';
     sendResponse({ ok: true, state: 'cancelled' });
+  } else {
+    sendResponse({ ok: false, message: '取消任务的 jobId 或 attemptId 不匹配。' });
   }
   return false;
 });

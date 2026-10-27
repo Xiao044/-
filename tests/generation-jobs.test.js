@@ -207,3 +207,48 @@ test('frontend hydration scopes candidates to the current attempt and marks save
   assert.match(source, /jobRecorded: true/);
   assert.match(source, /currentSavedResults = item\.savedResults\.filter/);
 });
+
+test('generation POST idempotency key returns the original job', async (t) => {
+  const { base } = await startServer(t);
+  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': 'm1-duplicate-key' };
+  const body = JSON.stringify({ platforms: ['doubao'], prompt: 'duplicate suppression', idempotencyKey: 'm1-duplicate-key' });
+  const first = await fetch(`${base}/api/projects/demo/generation-jobs`, { method: 'POST', headers, body });
+  const firstPayload = await first.json();
+  assert.equal(first.status, 201);
+  const second = await fetch(`${base}/api/projects/demo/generation-jobs`, { method: 'POST', headers, body });
+  const secondPayload = await second.json();
+  assert.equal(second.status, 200);
+  assert.equal(secondPayload.idempotent, true);
+  assert.equal(secondPayload.job.jobId, firstPayload.job.jobId);
+  const listed = await (await fetch(`${base}/api/projects/demo/generation-jobs`)).json();
+  assert.equal(listed.jobs.filter((job) => job.idempotencyKey === 'm1-duplicate-key').length, 1);
+});
+
+test('protocol helper normalizes required bridge event fields', () => {
+  const protocol = require('../doubao-extension/protocol');
+  const event = protocol.normalizeEvent({ type: 'PLATFORM_ERROR', platform: 'Gemini', state: 'extension_disconnected', message: 'bridge timeout' }, { jobId: 'job-1', attemptId: 'attempt-1' });
+  assert.equal(event.platform, 'gemini');
+  assert.equal(event.jobId, 'job-1');
+  assert.equal(event.attemptId, 'attempt-1');
+  assert.equal(event.state, 'extension_disconnected');
+  assert.equal(event.errorCode, 'EXTENSION_DISCONNECTED');
+  assert.match(event.timestamp, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('extension_disconnected is terminal failure and preserves protocol error fields', async (t) => {
+  const { base } = await startServer(t);
+  const created = await json(base, '/api/projects/demo/generation-jobs', {
+    method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: 'bridge disconnect' })
+  });
+  const job = (await created.json()).job;
+  const entry = job.platforms.doubao;
+  const patched = await json(base, `/api/projects/demo/generation-jobs/${job.jobId}/platforms/doubao`, {
+    method: 'PATCH', body: JSON.stringify({ jobId: job.jobId, platform: 'doubao', attemptId: entry.attemptId, status: 'extension_disconnected', errorCode: 'EXTENSION_DISCONNECTED', errorMessage: 'bridge timeout', message: '平台页面连接已断开' })
+  });
+  assert.equal(patched.status, 200);
+  const persisted = (await patched.json()).job.platforms.doubao;
+  assert.equal(persisted.status, 'extension_disconnected');
+  assert.equal(persisted.errorCode, 'EXTENSION_DISCONNECTED');
+  assert.equal(persisted.errorMessage, 'bridge timeout');
+  assert.equal((await (await fetch(`${base}/api/projects/demo/generation-jobs/${job.jobId}`)).json()).job.status, 'failed');
+});

@@ -1,3 +1,4 @@
+importScripts('protocol.js');
 const PLATFORM_URLS = {
   chatgpt: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
   gemini: ['https://gemini.google.com/*'],
@@ -82,10 +83,13 @@ const saveRoute = async (job, sourceTabId, platformTabId) => {
 };
 
 const findRoute = async (message, sender) => {
-  if (message.jobId && message.platform) {
-    const key = `${JOB_ROUTE_PREFIX}${message.jobId}:${message.platform}`;
+  if (message.jobId) {
+    if (!message.platform) return null;
+    const key = `${JOB_ROUTE_PREFIX}${message.jobId}:${String(message.platform).toLowerCase()}`;
     const stored = await chrome.storage.session.get(key);
-    return stored[key] || null;
+    const route = stored[key];
+    if (!route || route.jobId !== String(message.jobId) || route.platform !== String(message.platform).toLowerCase()) return null;
+    return route;
   }
   if (sender.tab?.id) {
     const stored = await chrome.storage.session.get(`${ROUTE_PREFIX}${sender.tab.id}`);
@@ -93,6 +97,14 @@ const findRoute = async (message, sender) => {
   }
   return null;
 };
+
+const routesForPlatformTab = async (platformTabId) => {
+  const stored = await chrome.storage.session.get(null);
+  return Object.entries(stored).filter(([key, value]) => (key.startsWith(JOB_ROUTE_PREFIX) || key.startsWith(ROUTE_PREFIX))
+    && value && Number(value.platformTabId) === Number(platformTabId));
+};
+
+const protocolEvent = (message = {}, defaults = {}) => ZaotuProtocol.normalizeEvent(message, defaults);
 
 const toWorkbench = async (route, message) => {
   if (!route?.sourceTabId) return false;
@@ -108,7 +120,8 @@ const preparePlatformJob = async (platform, payload, sourceTabId) => {
   await saveRoute(job, sourceTabId, tab.id);
   const type = platform === 'doubao' ? 'ZAOTU_RUN_DOUBAO_JOB' : 'ZAOTU_RUN_PLATFORM_JOB';
   const response = await sendTabMessage(tab.id, { type, platform, job });
-  return response || { ok: true, platform, tabId: tab.id, state: 'dispatched' };
+  if (!response || response.ok !== true) throw Object.assign(new Error(response?.message || `${platform} 页面适配器未确认任务已发送。`), { needsPage: false });
+  return { ...response, platform, tabId: tab.id, platformTabId: tab.id };
 };
 
 const readSelectedImage = async (result) => {
@@ -140,17 +153,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'ZAOTU_RESULT_CANDIDATES' || message?.type === 'ZAOTU_STATUS') {
-    findRoute(message, sender).then((route) => toWorkbench(route, { ...message, platform: message.platform || route?.platform || 'doubao' })).then(() => sendResponse({ ok: true }));
+    findRoute(message, sender).then((route) => toWorkbench(route, protocolEvent(message, { platform: route?.platform || 'doubao', jobId: route?.jobId, attemptId: route?.attemptId, type: message.type }))).then(() => sendResponse({ ok: true }));
     return true;
   }
 
   if (message?.type === 'ZAOTU_CANCEL_PLATFORM_JOB') {
     const platform = String(message.platform || '').toLowerCase();
-    findPlatformTab(platform).then((tab) => {
-      if (!tab?.id) throw Object.assign(new Error('目标平台页面未打开。'), { needsPage: true });
-      return sendTabMessage(tab.id, message);
-    }).then((response) => sendResponse(response || { ok: true, state: 'cancelled', platform }))
-      .catch((error) => sendResponse({ ok: false, platform, needsPage: Boolean(error.needsPage), message: error.message || '取消平台任务失败。' }));
+    findRoute(message, sender).then(async (route) => {
+      const tabId = route?.platformTabId || (!message.jobId ? (await findPlatformTab(platform))?.id : null);
+      if (!tabId) throw Object.assign(new Error('目标平台页面未打开。'), { needsPage: true });
+      if (route && route.platform !== platform) throw Object.assign(new Error('取消任务的平台路由不匹配。'), { needsPage: false });
+      const response = await sendTabMessage(tabId, message);
+      if (!response || response.ok !== true) throw Object.assign(new Error(response?.message || '平台适配器未确认取消任务。'), { needsPage: false });
+      return response;
+    }).then((response) => sendResponse(response))
+      .catch(async (error) => {
+        const route = await findRoute(message, sender).catch(() => null);
+        if (route) await toWorkbench(route, protocolEvent({ type: 'PLATFORM_STATUS', platform, jobId: message.jobId, attemptId: message.attemptId, state: error.needsPage ? 'not_open' : 'extension_disconnected', message: error.message || '扩展与平台页面连接已断开。' }));
+        sendResponse({ ok: false, platform, needsPage: Boolean(error.needsPage), message: error.message || '取消平台任务失败。' });
+      });
     return true;
   }
 
@@ -165,11 +186,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  const tabKey = `${ROUTE_PREFIX}${tabId}`;
-  chrome.storage.session.get(tabKey).then((stored) => {
-    const route = stored[tabKey];
-    const keys = [tabKey];
-    if (route) keys.push(`${JOB_ROUTE_PREFIX}${route.jobId}:${route.platform}`);
+  routesForPlatformTab(tabId).then(async (entries) => {
+    const keys = [...new Set(entries.map(([key]) => key).concat(`${ROUTE_PREFIX}${tabId}`))];
+    const routes = [...new Map(entries.map(([, route]) => [`${route.jobId}:${route.platform}:${route.attemptId}:${route.sourceTabId}`, route])).values()];
+    await Promise.all(routes.map((route) => toWorkbench(route, protocolEvent({
+      type: 'PLATFORM_STATUS', platform: route.platform, jobId: route.jobId, attemptId: route.attemptId,
+      platformTabId: tabId, state: 'not_open', errorCode: 'PAGE_NOT_OPEN', message: '平台页面已关闭，请重新打开并重试。'
+    }))));
     return chrome.storage.session.remove(keys);
-  });
+  }).catch((error) => console.warn('[造图扩展] 平台标签页移除处理失败', error.message));
 });

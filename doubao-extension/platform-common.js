@@ -130,7 +130,10 @@
       const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('无法读取平台结果图片。')); reader.readAsDataURL(blob);
     });
   };
-  const cancel = (reason = 'cancelled') => {
+  const cancel = (reason = 'cancelled', requestedJobId = '', requestedAttemptId = '') => {
+    if (!requestedJobId || !requestedAttemptId || requestedJobId !== activeJobId || requestedAttemptId !== activeAttemptId) {
+      return { ok: false, reason: 'mismatched_attempt' };
+    }
     if (activeMonitorCancel) activeMonitorCancel();
     activeMonitorCancel = null;
     const cancelledJobId = activeJobId;
