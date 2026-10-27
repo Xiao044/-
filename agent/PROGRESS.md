@@ -38,6 +38,7 @@ Agent 后端核心、项目级运行记录、旧数据迁移、工作台基础�
 - V2.0 M0 已完成本地实现：生图任务写入统一校验 `jobId + platform + attemptId`，旧 attempt 和终态回退会被拒绝；任务状态归一化覆盖完成、失败、取消、过期和混合终态；过期任务会在读取/更新时收口；结果恢复保留 `savedResults` 并避免重复归档；前端和扩展按当前 attempt 丢弃旧消息，状态写入按任务/平台/attempt 串行化。`/assets` 路径不再允许穿越到项目根目录敏感文件。
 - 新增隔离的 `tests/generation-jobs.test.js`，覆盖重试、旧写入、结果保存、混合状态、过期、整批过期终态保护、并发 PATCH、前端候选恢复、幂等创建和静态路径访问；全量 `node --test tests/*.test.js` 并行及串行均为 35/35 通过。M0 提交 `54d87f1`、`ca2015f` 已推送。
 - M1 协议切片已完成并推送（`3b02f5b`）：扩展新增统一事件规范化，补齐时间戳、任务/平台/attempt 标识、状态和错误码；标签页移除会通知所有相关工作台并清理旧路由；取消要求匹配 jobId 与 attemptId，断连状态会持久化为失败；重复创建任务使用幂等键且 CORS 允许预检。真实 Chrome/Edge 与四平台矩阵尚未执行。
+- 新增 `tests/extension-adapters.test.js` 的本地 VM/DOM fixture：覆盖协议规范化、四个平台登录检测、提示词发现、提交按钮选择、结果筛选和 jobId/attemptId 取消匹配；使用 Node 内建模块，无第三方依赖。全量测试现为 44/44，通过但不替代真实 Chrome/Edge 或第三方页面验收。
 - 本阶段服务 `http://127.0.0.1:5174` 重启后，健康接口、页面和 Agent 历史读取均返回 200，项目中可读到 1 条运行记录；既有 `5173` 服务未受影响。
 - 真实 DeepSeek 后端验收：`GET /models` 返回 200，可用模型为 `deepseek-flash`、`deepseek-v4-pro`；将本机 `.env` 配置为较低成本的 `deepseek-flash` 后，`POST /api/agent` 真实调用返回 200、`schemaVersion: 1` 和非空 A 版，用户填写的淡水珍珠、乳白色、直径 8mm 均保留，未产生事实警告。调用使用无状态兼容接口，没有写入项目运行历史。此前无效模型名 `4.0flash` 的调用返回 `MODEL_REQUEST_FAILED`，未重试或记录运行。
 - 恢复按钮经浏览器 UI 点击的原生确认框处理未能自动化；恢复克隆结果已在隔离项目的历史 UI 中核验，纯 UI 点击路径仍属未验证项。
