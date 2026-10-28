@@ -39,6 +39,7 @@ Agent 后端核心、项目级运行记录、旧数据迁移、工作台基础�
 - 新增隔离的 `tests/generation-jobs.test.js`，覆盖重试、旧写入、结果保存、混合状态、过期、整批过期终态保护、并发 PATCH、前端候选恢复、幂等创建和静态路径访问；全量 `node --test tests/*.test.js` 并行及串行均为 35/35 通过。M0 提交 `54d87f1`、`ca2015f` 已推送。
 - M1 协议切片已完成并推送（`3b02f5b`）：扩展新增统一事件规范化，补齐时间戳、任务/平台/attempt 标识、状态和错误码；标签页移除会通知所有相关工作台并清理旧路由；取消要求匹配 jobId 与 attemptId，断连状态会持久化为失败；重复创建任务使用幂等键且 CORS 允许预检。真实 Chrome/Edge 与四平台矩阵尚未执行。
 - 新增 `tests/extension-adapters.test.js` 的本地 VM/DOM fixture：覆盖协议规范化、四个平台登录检测、提示词发现、提交按钮选择、结果筛选和 jobId/attemptId 取消匹配；使用 Node 内建模块，无第三方依赖。全量测试现为 44/44，通过但不替代真实 Chrome/Edge 或第三方页面验收。
+- M4 资产筛选和元数据显示已完成并推送（`fe307a6`）：资产库新增 jobId、attemptId、创建起止时间筛选，日期上界按整日包含；卡片展示 assetId、candidateId、创建/更新时间、归档时间、来源/归档链接；链接协议白名单防止不安全 href。全量测试 66/66 串行通过；并行偶发 Agent API 共享数据竞态已记录。
 - M4 资产库 UI 已完成并推送（`1a9b5c7`）：项目工具新增结果资产库入口，支持缩略图、元数据、搜索、平台/状态/收藏/标签/prompt 版本筛选，收藏和标签 PATCH、软删除 DELETE、刷新/空态/错误态；异步请求有 modal/request 身份保护，现有生成结果选择与归档流程保持不变。全量测试 66/66 串行和并行通过。
 - V2.0 M4 资产注册表切片已本地完成（提交 `2ff46de`，推送因 GitHub 网络超时待重试）：生成结果导入会创建独立 `result-assets.json` 元数据，保留旧 `savedResults`；支持 source/archived/thumbnail URL、尺寸、promptVersion、标签、收藏、temp/archived/invalid/deleted 生命周期，以及平台/job/attempt/version/tag/status/time 筛选、重启恢复和双存储失败回滚。全量测试 65/65 串行通过，未跟踪 `.review*.diff` 未纳入。
 - V2.0 M4 第一切片已完成并推送（`f1329bd`）：新增服务端不可变项目版本存储与版本 API（列表、创建、恢复为新版本），快照包含完整项目 A/B、平台覆盖、任务/结果引用；恢复采用双文件回滚保护，源版本、任务和结果不被原地覆盖；版本 UI 改为读取服务端版本并调用恢复接口，保留本地离线版本兼容。新增版本重启、恢复、项目隔离、损坏快照、malformed URI 和回滚测试；全量测试 61/61 串行和并行通过。
