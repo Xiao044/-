@@ -1907,7 +1907,7 @@
           const upload = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': contentType }, body: imageBlob });
           const uploaded = await upload.json().catch(() => ({}));
           if (!upload.ok || !uploaded.url) throw new Error(uploaded.error || '结果图片保存失败。');
-          result = { ...result, url: new URL(uploaded.url, window.location.href).href, saved: true };
+          result = { ...result, sourceUrl: result.sourceUrl || result.url, url: new URL(uploaded.url, window.location.href).href, saved: true };
           delete result.imageDataUrl;
           delete result.imageMimeType;
         }
@@ -1915,7 +1915,7 @@
           const record = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/results`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jobId: generationJobId, platform: result.platform || 'doubao', attemptId: result.attemptId || generationPlatforms[result.platform || 'doubao']?.attemptId || '', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname })
+            body: JSON.stringify({ jobId: generationJobId, platform: result.platform || 'doubao', attemptId: result.attemptId || generationPlatforms[result.platform || 'doubao']?.attemptId || '', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname, sourceUrl: result.sourceUrl || result.url, promptVersion: Number(result.promptVersion || promptBVersion) || 1, ...(result.dimensions ? { dimensions: result.dimensions } : {}) })
           });
           const payload = await record.json().catch(() => ({}));
           if (!record.ok) throw new Error(payload.error || '结果记录保存失败。');

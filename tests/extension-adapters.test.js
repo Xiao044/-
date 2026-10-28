@@ -558,3 +558,35 @@ test('Doubao adapter detects login state before filling', async () => {
   assert.equal(fixture.prompt.value, '');
   assert.equal(statusStates(fixture).at(-1), 'login_required');
 });
+
+
+test('selected result image measures fetched blob dimensions and safely falls back', async () => {
+  const body = source('background.js').match(/const readSelectedImage = async \(result\) => \{[\s\S]*?\n\};/);
+  assert.ok(body, 'selected image reader must be present');
+  const blob = new Blob(['image-bytes'], { type: 'image/png' });
+  const loadReader = (decoder) => {
+    const context = {
+      fetch: async () => ({ ok: true, blob: async () => blob }),
+      blobToDataUrl: async () => 'data:image/png;base64,aW1hZ2U=',
+      ...(decoder ? { createImageBitmap: decoder } : {})
+    };
+    vm.runInNewContext(`${body[0]}\nglobalThis.reader = readSelectedImage;`, context);
+    return context.reader;
+  };
+  let closed = false;
+  const measured = await loadReader(async (input) => {
+    assert.equal(input, blob);
+    return { width: 1024, height: 1536, close: () => { closed = true; } };
+  })({ url: 'https://source.example.test/generated.png', sourceUrl: 'original-source' });
+  assert.equal(measured.dimensions.width, 1024);
+  assert.equal(measured.dimensions.height, 1536);
+  assert.equal(measured.sourceUrl, 'original-source');
+  assert.equal(measured.imageMimeType, 'image/png');
+  assert.equal(closed, true);
+  const unavailable = await loadReader()({ url: 'https://source.example.test/generated.png' });
+  assert.equal(unavailable.dimensions, null);
+  assert.match(unavailable.imageDataUrl, /^data:image\/png/);
+  const failed = await loadReader(async () => { throw new Error('decode failed'); })({ url: 'https://source.example.test/generated.png' });
+  assert.equal(failed.dimensions, null);
+  assert.match(failed.imageDataUrl, /^data:image\/png/);
+});

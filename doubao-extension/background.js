@@ -132,7 +132,17 @@ const readSelectedImage = async (result) => {
   const type = blob.type.split(';')[0].toLowerCase();
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(type)) throw new Error('结果图片格式不受支持。');
   if (blob.size > 8 * 1024 * 1024) throw new Error('单张结果图片不能超过 8MB。');
-  return { ...result, imageDataUrl: await blobToDataUrl(blob), imageMimeType: type };
+  let dimensions = null;
+  if (typeof createImageBitmap === 'function') {
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(blob);
+      if (bitmap.width > 0 && bitmap.height > 0) dimensions = { width: bitmap.width, height: bitmap.height };
+    } catch {} finally {
+      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+    }
+  }
+  return { ...result, dimensions, imageDataUrl: await blobToDataUrl(blob), imageMimeType: type };
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

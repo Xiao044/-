@@ -35,6 +35,7 @@ const dataDir = path.resolve(process.env.ZAOTU_DATA_DIR || path.join(root, 'data
 const projectStorePath = path.join(dataDir, 'projects.json');
 const projectVersionsPath = path.join(dataDir, 'project-versions.json');
 const generationJobsPath = path.join(dataDir, 'generation-jobs.json');
+const resultAssetsPath = path.join(dataDir, 'result-assets.json');
 const uploadsDir = path.join(dataDir, 'uploads');
 const assetsDir = path.join(root, 'assets');
 const projectIdPattern = /^[A-Za-z0-9_\-\u4e00-\u9fff]{1,80}$/;
@@ -197,7 +198,7 @@ const sendJson = (res, statusCode, payload) => {
     'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS'
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
   });
   res.end(body);
 };
@@ -326,6 +327,79 @@ const writeGenerationJobs = (jobs) => {
   fs.writeFileSync(temporaryPath, JSON.stringify(normalizeGenerationJobs(jobs), null, 2), 'utf8');
   fs.renameSync(temporaryPath, generationJobsPath);
 };
+
+const RESULT_ASSET_STATUSES = new Set(['temp', 'archived', 'invalid', 'deleted']);
+const normalizeAssetDimensions = (value) => {
+  if (!isPlainObject(value)) return null;
+  const { width, height } = value;
+  return Number.isInteger(width) && width > 0 && width <= 100000
+    && Number.isInteger(height) && height > 0 && height <= 100000
+    ? { width, height } : null;
+};
+const normalizeResultAsset = (asset, projectId, assetId) => {
+  if (!isPlainObject(asset)) return null;
+  const archivedUrl = typeof (asset.archivedUrl || asset.url) === 'string'
+    && (asset.archivedUrl || asset.url).startsWith(`/uploads/${encodeURIComponent(projectId)}/`)
+    && !(asset.archivedUrl || asset.url).includes('..')
+    ? (asset.archivedUrl || asset.url).slice(0, 2048) : '';
+  if (!archivedUrl) return null;
+  const tags = Array.isArray(asset.tags)
+    ? [...new Set(asset.tags.map((tag) => String(tag).trim().slice(0, 40)).filter(Boolean))].slice(0, 30)
+    : [];
+  const status = RESULT_ASSET_STATUSES.has(asset.status) ? asset.status : 'archived';
+  const createdAt = String(asset.createdAt || new Date().toISOString()).slice(0, 40);
+  const thumbnailUrl = typeof asset.thumbnailUrl === 'string' && (/^https:\/\//.test(asset.thumbnailUrl) || asset.thumbnailUrl.startsWith(`/uploads/${encodeURIComponent(projectId)}/`)) && !asset.thumbnailUrl.includes('..')
+    ? asset.thumbnailUrl.slice(0, 2048) : archivedUrl;
+  return {
+    assetId: String(asset.assetId || assetId || '').slice(0, 120),
+    projectId,
+    url: archivedUrl,
+    archivedUrl,
+    thumbnailUrl,
+    sourceUrl: typeof asset.sourceUrl === 'string' ? asset.sourceUrl.slice(0, 2048) : archivedUrl,
+    jobId: String(asset.jobId || '').slice(0, 120),
+    platform: String(asset.platform || '').slice(0, 40),
+    candidateId: String(asset.candidateId || '').slice(0, 120),
+    attemptId: String(asset.attemptId || '').slice(0, 160),
+    promptVersion: Number.isInteger(asset.promptVersion) && asset.promptVersion > 0 ? asset.promptVersion : 1,
+    dimensions: normalizeAssetDimensions(asset.dimensions),
+    createdAt,
+    updatedAt: String(asset.updatedAt || createdAt).slice(0, 40),
+    archivedAt: typeof asset.archivedAt === 'string' ? asset.archivedAt.slice(0, 40) : (status === 'archived' ? createdAt : null),
+    tags,
+    favorite: Boolean(asset.favorite),
+    status,
+    ...(asset.deletedAt ? { deletedAt: String(asset.deletedAt).slice(0, 40) } : {})
+  };
+};
+
+const readResultAssets = () => {
+  try {
+    if (!fs.existsSync(resultAssetsPath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(resultAssetsPath, 'utf8'));
+    if (!isPlainObject(parsed)) return {};
+    const normalized = {};
+    for (const [projectId, assets] of Object.entries(parsed)) {
+      if (!isValidProjectId(projectId) || !isPlainObject(assets)) continue;
+      normalized[projectId] = Object.fromEntries(Object.entries(assets)
+        .map(([assetId, asset]) => [assetId, normalizeResultAsset(asset, projectId, assetId)])
+        .filter(([, asset]) => asset));
+    }
+    return normalized;
+  } catch (error) {
+    console.error('[result-assets] failed to read store:', error.message);
+    return {};
+  }
+};
+
+const writeResultAssets = (assets) => {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const temporaryPath = `${resultAssetsPath}.tmp`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(assets, null, 2), 'utf8');
+  fs.renameSync(temporaryPath, resultAssetsPath);
+};
+
+const createResultAssetId = () => `asset-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 
 const projectIdFromRequest = (req) => {
   const match = req.url.match(/^\/api\/projects\/([^/?]+)(?:\?.*)?$/);
@@ -569,6 +643,7 @@ const normalizeResultReference = (result) => {
   if (!id && !url) return null;
   return {
     id: id || `result-${Date.now().toString(36)}`,
+    ...(result.assetId ? { assetId: String(result.assetId).slice(0, 120) } : {}),
     candidateId: String(result.candidateId || id).slice(0, 120),
     url,
     sourceUrl: typeof result.sourceUrl === 'string' ? result.sourceUrl.slice(0, 2048) : url,
@@ -889,12 +964,47 @@ const handleGenerationJobsUnsafe = async (req, res) => {
     }
     const saved = { id: String(input.id || input.candidateId || '').slice(0, 120), candidateId: String(input.candidateId || input.id || '').slice(0, 120), url: assetUrl, platform, savedAt: now() };
     saved.attemptId = entry.attemptId;
+    if (hasOwn(input, 'promptVersion') && (!Number.isInteger(input.promptVersion) || input.promptVersion < 1)) {
+      sendJson(res, 400, { error: 'promptVersion must be a positive integer.' }); return;
+    }
+    if (hasOwn(input, 'dimensions') && input.dimensions !== null && !normalizeAssetDimensions(input.dimensions)) {
+      sendJson(res, 400, { error: 'dimensions must contain positive integer width and height.' }); return;
+    }
+    const assetStore = readResultAssets();
+    const assetId = createResultAssetId();
+    const asset = normalizeResultAsset({
+      assetId, archivedUrl: assetUrl, thumbnailUrl: input.thumbnailUrl,
+      sourceUrl: typeof input.sourceUrl === 'string' ? input.sourceUrl : assetUrl,
+      jobId, platform, candidateId: saved.candidateId, attemptId: entry.attemptId,
+      promptVersion: input.promptVersion || job.bSnapshot?.version || 1,
+      dimensions: input.dimensions, createdAt: saved.savedAt, archivedAt: saved.savedAt,
+      tags: [], favorite: false, status: 'archived'
+    }, projectId, assetId);
+    assetStore[projectId] = assetStore[projectId] || {};
+    assetStore[projectId][assetId] = asset;
+    saved.assetId = assetId;
     entry.savedResults = [...entry.savedResults, saved].slice(-12);
     entry.status = 'completed';
     entry.updatedAt = now();
     entry.errorCode = '';
     entry.errorMessage = '';
-    persistJob(201, { result: saved });
+    job.updatedAt = now();
+    job.status = deriveGenerationJobStatus(job.platforms);
+    const originals = [resultAssetsPath, generationJobsPath].map((filePath) => [filePath, readFileState(filePath)]);
+    try {
+      writeResultAssets(assetStore);
+      writeGenerationJobs(jobs);
+    } catch (error) {
+      for (const [filePath, original] of originals) {
+        try { restoreFileState(filePath, original); }
+        catch (rollbackError) { console.error('[result-assets] rollback failed:', rollbackError.message); }
+        try { if (fs.existsSync(`${filePath}.tmp`)) fs.unlinkSync(`${filePath}.tmp`); } catch {}
+      }
+      console.error('[result-assets] failed to import result:', error.message);
+      sendJson(res, 500, { error: 'Result asset could not be saved.' });
+      return;
+    }
+    sendJson(res, 201, { job, result: saved, asset });
     return;
   }
   sendJson(res, 405, { error: 'Method not allowed.' });
@@ -926,9 +1036,92 @@ const readBinaryBody = (req, maxBytes = 8 * 1024 * 1024) => new Promise((resolve
 
 const assetPathFromRequest = (req) => {
   const match = req.url.match(/^\/api\/projects\/([^/?]+)\/assets(?:\?.*)?$/);
-  return match ? decodeURIComponent(match[1]) : '';
+  return match ? decodeRoutePart(match[1]) : '';
 };
 
+
+
+const resultAssetsPathFromRequest = (req) => {
+  const match = req.url.match(/^\/api\/projects\/([^/?]+)\/(?:result-assets|assets)(?:\/([^/?]+))?(?:\?.*)?$/);
+  return { projectId: match ? decodeRoutePart(match[1]) : '', assetId: match?.[2] ? decodeRoutePart(match[2]) : '' };
+};
+
+const handleResultAssets = async (req, res) => {
+  const { projectId, assetId } = resultAssetsPathFromRequest(req);
+  if (!isValidProjectId(projectId)) { sendJson(res, 400, { error: 'Invalid project id.' }); return; }
+  if (assetId === null || (assetId && !/^asset-[A-Za-z0-9-]{8,120}$/.test(assetId))) { sendJson(res, 400, { error: 'Invalid result asset id.' }); return; }
+  const store = readResultAssets();
+  const projectAssets = store[projectId] || {};
+  if (!assetId && req.method === 'GET') {
+    const query = new URL(req.url, 'http://127.0.0.1').searchParams;
+    const status = query.get('status');
+    if (status && !RESULT_ASSET_STATUSES.has(status)) { sendJson(res, 400, { error: 'Invalid result asset status.' }); return; }
+    const includeDeleted = query.get('includeDeleted') === 'true';
+    const favorite = query.get('favorite');
+    if (favorite !== null && !['true', 'false'].includes(favorite)) { sendJson(res, 400, { error: 'favorite must be true or false.' }); return; }
+    const version = query.get('promptVersion') ?? query.get('version');
+    if (version !== null && (!/^\d+$/.test(version) || Number(version) < 1)) { sendJson(res, 400, { error: 'version must be a positive integer.' }); return; }
+    const from = query.get('from') ?? query.get('createdAfter') ?? query.get('createdFrom') ?? query.get('since');
+    const to = query.get('to') ?? query.get('createdBefore') ?? query.get('createdTo') ?? query.get('until');
+    const fromMs = from === null ? null : Date.parse(from);
+    const toMs = to === null ? null : Date.parse(to);
+    if ((fromMs !== null && !Number.isFinite(fromMs)) || (toMs !== null && !Number.isFinite(toMs)) || (fromMs !== null && toMs !== null && fromMs > toMs)) {
+      sendJson(res, 400, { error: 'Invalid result asset time range.' }); return;
+    }
+    const platform = query.get('platform');
+    const jobId = query.get('jobId') ?? query.get('job');
+    const attemptId = query.get('attemptId') ?? query.get('attempt');
+    const tag = query.get('tag');
+    const assets = Object.values(projectAssets).filter((asset) => {
+      if (status ? asset.status !== status : !includeDeleted && asset.status === 'deleted') return false;
+      if (platform && asset.platform !== platform) return false;
+      if (jobId && asset.jobId !== jobId) return false;
+      if (attemptId && asset.attemptId !== attemptId) return false;
+      if (version !== null && asset.promptVersion !== Number(version)) return false;
+      if (favorite !== null && asset.favorite !== (favorite === 'true')) return false;
+      if (tag && !asset.tags.includes(tag)) return false;
+      const createdAtMs = Date.parse(asset.createdAt);
+      return !(fromMs !== null && createdAtMs < fromMs) && !(toMs !== null && createdAtMs > toMs);
+    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    sendJson(res, 200, { projectId, assets });
+    return;
+  }
+  if (!assetId) { sendJson(res, 405, { error: 'Method not allowed.' }); return; }
+  const asset = projectAssets[assetId];
+  if (!asset) { sendJson(res, 404, { error: 'Result asset not found.' }); return; }
+  if (req.method === 'GET') { sendJson(res, 200, { asset }); return; }
+  if (req.method === 'PATCH') {
+    const input = await readJsonBody(req, res);
+    if (!input) return;
+    if (hasOwn(input, 'tags') && (!Array.isArray(input.tags) || input.tags.length > 30 || input.tags.some((tag) => typeof tag !== 'string' || tag.trim().length > 40))) {
+      sendJson(res, 400, { error: 'tags must be an array of at most 30 strings of at most 40 characters.' }); return;
+    }
+    if (hasOwn(input, 'favorite') && typeof input.favorite !== 'boolean') { sendJson(res, 400, { error: 'favorite must be a boolean.' }); return; }
+    if (hasOwn(input, 'status') && !RESULT_ASSET_STATUSES.has(input.status)) { sendJson(res, 400, { error: 'status must be temp, archived, invalid, or deleted.' }); return; }
+    if (hasOwn(input, 'tags')) asset.tags = [...new Set(input.tags.map((tag) => tag.trim()).filter(Boolean))];
+    if (hasOwn(input, 'favorite')) asset.favorite = input.favorite;
+    const timestamp = new Date().toISOString();
+    if (hasOwn(input, 'status')) {
+      asset.status = input.status;
+      if (asset.status === 'deleted') asset.deletedAt = asset.deletedAt || timestamp;
+      else delete asset.deletedAt;
+      if (asset.status === 'archived' && !asset.archivedAt) asset.archivedAt = timestamp;
+    }
+    asset.updatedAt = timestamp;
+    try { writeResultAssets(store); } catch (error) { sendJson(res, 500, { error: 'Result asset could not be saved.' }); return; }
+    sendJson(res, 200, { asset });
+    return;
+  }
+  if (req.method === 'DELETE') {
+    asset.status = 'deleted';
+    asset.deletedAt = asset.deletedAt || new Date().toISOString();
+    asset.updatedAt = asset.deletedAt;
+    try { writeResultAssets(store); } catch (error) { sendJson(res, 500, { error: 'Result asset could not be saved.' }); return; }
+    sendJson(res, 200, { asset });
+    return;
+  }
+  sendJson(res, 405, { error: 'Method not allowed.' });
+};
 
 const handleAssetUpload = async (req, res) => {
   const projectId = assetPathFromRequest(req);
@@ -1342,11 +1535,18 @@ const serveStatic = (req, res) => {
 };
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS' }); res.end(); return; }
+  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS' }); res.end(); return; }
   if (req.method === 'GET' && req.url === '/api/health') { sendJson(res, 200, { ok: true, provider: 'deepseek', configured: Boolean(deepseekApiKey), imageProvider: 'multi-platform-extension' }); return; }
   if (req.method === 'POST' && req.url === '/api/agent') { await handleAgent(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore|cancel))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }
   if (/^\/(api\/projects\/[^/?]+\/generation-jobs)/.test(req.url)) { await handleGenerationJobs(req, res); return; }
+  if (/^\/api\/projects\/[^/?]+\/(?:result-assets|assets)(?:\/|\?|$)/.test(req.url) && !(req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets(?:\?|$)/.test(req.url))) {
+    if (req.method === 'GET') { await handleResultAssets(req, res); return; }
+    const run = generationJobsMutationTail.then(() => handleResultAssets(req, res));
+    generationJobsMutationTail = run.catch(() => {});
+    await run;
+    return;
+  }
   if (/^\/api\/projects\/[^/?]+\/versions(?:\/[^/?]+\/restore)?(?:\?.*)?$/.test(req.url)) { await handleProjectVersions(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await handleAssetUpload(req, res); return; }
   if ((req.method === 'GET' || req.method === 'PUT') && /^\/api\/projects\//.test(req.url)) { await handleProject(req, res); return; }

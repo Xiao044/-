@@ -23,7 +23,12 @@ const startServer = async (t, options = {}) => {
   const port = await getPort();
   const child = spawn(process.execPath, [serverPath], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), ZAOTU_DATA_DIR: dataDir, DEEPSEEK_API_KEY: '' },
+    env: {
+      ...process.env,
+      PORT: String(port), ZAOTU_DATA_DIR: dataDir, DEEPSEEK_API_KEY: '',
+      ...(options.env || {}),
+      ...(options.nodeOptions ? { NODE_OPTIONS: options.nodeOptions } : {})
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let logs = '';
@@ -104,6 +109,95 @@ test('task center API lists 20 mixed jobs and preserves attempt results after re
   assert.equal(persisted.platforms.gemini.status, 'cancelled');
 });
 
+test('result assets are indexed, filterable, editable, soft-deleted, and persistent', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-result-assets-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, { dataDir });
+  const created = await json(server.base, '/api/projects/demo/generation-jobs', { method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: 'asset registry test' }) });
+  const job = (await created.json()).job;
+  const upload = await fetch(server.base + '/api/projects/demo/assets', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: Buffer.from('asset bytes') });
+  assert.equal(upload.status, 201);
+  const uploadInfo = await upload.json();
+  const saved = await json(server.base, '/api/projects/demo/generation-jobs/' + job.jobId + '/results', { method: 'POST', body: JSON.stringify({ jobId: job.jobId, platform: 'doubao', attemptId: job.platforms.doubao.attemptId, assetUrl: uploadInfo.url, sourceUrl: 'https://source.example.test/generated.png', thumbnailUrl: '/uploads/demo/thumbnail.png', promptVersion: 7, dimensions: { width: 640, height: 480 }, id: 'candidate-1' }) });
+  const savedBody = await saved.json();
+  assert.equal(saved.status, 201, JSON.stringify(savedBody));
+  assert.equal(savedBody.job.platforms.doubao.savedResults.length, 1);
+  assert.equal(savedBody.job.platforms.doubao.savedResults[0].id, 'candidate-1');
+  assert.equal(savedBody.job.platforms.doubao.savedResults[0].url, uploadInfo.url);
+  const asset = savedBody.asset;
+  assert.equal(asset.url, uploadInfo.url);
+  assert.equal(asset.archivedUrl, uploadInfo.url);
+  assert.equal(asset.thumbnailUrl, '/uploads/demo/thumbnail.png');
+  assert.equal(asset.sourceUrl, 'https://source.example.test/generated.png');
+  assert.equal(asset.promptVersion, 7);
+  assert.deepEqual(asset.dimensions, { width: 640, height: 480 });
+  assert.match(asset.archivedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(asset.status, 'archived');
+  assert.equal(asset.jobId, job.jobId);
+  assert.equal(asset.platform, 'doubao');
+  assert.equal(asset.candidateId, 'candidate-1');
+  const edited = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ tags: [' campaign ', 'hero', 'campaign'], favorite: true }) });
+  assert.equal(edited.status, 200);
+  assert.deepEqual((await edited.json()).asset.tags, ['campaign', 'hero']);
+  const filtered = await (await fetch(server.base + '/api/projects/demo/result-assets?favorite=true&tag=hero&platform=doubao')).json();
+  assert.equal(filtered.assets.length, 1);
+  assert.equal(filtered.assets[0].assetId, asset.assetId);
+  const versionAndTimeFiltered = await (await fetch(server.base + `/api/projects/demo/assets?status=archived&version=7&attemptId=${encodeURIComponent(asset.attemptId)}&createdFrom=${encodeURIComponent(asset.createdAt)}&createdTo=${encodeURIComponent(asset.createdAt)}`)).json();
+  assert.equal(versionAndTimeFiltered.assets.length, 1);
+  assert.equal(versionAndTimeFiltered.assets[0].assetId, asset.assetId);
+  const temp = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ status: 'temp' }) });
+  assert.equal(temp.status, 200);
+  assert.equal((await temp.json()).asset.status, 'temp');
+  const archived = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ status: 'archived' }) });
+  assert.equal(archived.status, 200);
+  assert.match((await archived.json()).asset.archivedAt, /^\d{4}-\d{2}-\d{2}T/);
+  const invalid = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ status: 'invalid' }) });
+  assert.equal(invalid.status, 200);
+  assert.equal((await invalid.json()).asset.status, 'invalid');
+  const removed = await fetch(server.base + '/api/projects/demo/result-assets/' + asset.assetId, { method: 'DELETE' });
+  assert.equal(removed.status, 200);
+  assert.equal((await (await fetch(server.base + '/api/projects/demo/result-assets')).json()).assets.length, 0);
+  assert.equal((await (await fetch(server.base + '/api/projects/demo/result-assets?status=deleted')).json()).assets.length, 1);
+  assert.equal((await (await fetch(server.base + '/api/projects/other/result-assets')).json()).assets.length, 0);
+  server.child.kill();
+  await new Promise((resolve, reject) => { if (server.child.exitCode !== null) return resolve(); server.child.once('exit', resolve); server.child.once('error', reject); });
+  const restarted = await startServer(t, { dataDir });
+  const persisted = await (await fetch(restarted.base + '/api/projects/demo/result-assets?includeDeleted=true')).json();
+  assert.equal(persisted.assets.length, 1);
+  assert.equal(persisted.assets[0].status, 'deleted');
+  assert.equal(persisted.assets[0].favorite, true);
+  assert.deepEqual(persisted.assets[0].tags, ['campaign', 'hero']);
+  const savedJobs = await (await fetch(restarted.base + '/api/projects/demo/generation-jobs')).json();
+  assert.equal(savedJobs.jobs[0].platforms.doubao.savedResults[0].assetId, asset.assetId);
+});
+
+test('malformed result asset route parts return 400 and health remains available', async (t) => {
+  const { base } = await startServer(t);
+  const malformedProject = await fetch(base + '/api/projects/%E0%A4%A/result-assets');
+  assert.equal(malformedProject.status, 400);
+  const malformedAsset = await fetch(base + '/api/projects/demo/result-assets/%E0%A4%A');
+  assert.equal(malformedAsset.status, 400);
+  assert.equal((await fetch(base + '/api/health')).status, 200);
+});
+
+test('result import rolls back both stores when generation job persistence fails', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-result-assets-rollback-'));
+  const preloadPath = path.join(dataDir, 'fail-second-store.cjs');
+  fs.writeFileSync(preloadPath, `const fs = require('node:fs'); const path = require('node:path'); const original = fs.renameSync; let armed = false; let failed = false; fs.renameSync = function (from, to) { const destination = path.basename(to); if (!failed && destination === 'result-assets.json') armed = true; if (armed && !failed && destination === 'generation-jobs.json') { failed = true; throw new Error('injected second-store failure'); } return original.apply(this, arguments); };`, 'utf8');
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, { dataDir, nodeOptions: `--require=${preloadPath}` });
+  const created = await json(server.base, '/api/projects/demo/generation-jobs', { method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: 'rollback test' }) });
+  const job = (await created.json()).job;
+  const upload = await fetch(server.base + '/api/projects/demo/assets', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: Buffer.from('rollback bytes') });
+  const uploadInfo = await upload.json();
+  const jobsBefore = fs.readFileSync(path.join(dataDir, 'generation-jobs.json'));
+  const imported = await json(server.base, `/api/projects/demo/generation-jobs/${job.jobId}/results`, { method: 'POST', body: JSON.stringify({ jobId: job.jobId, platform: 'doubao', attemptId: job.platforms.doubao.attemptId, assetUrl: uploadInfo.url, id: 'rollback-candidate' }) });
+  assert.equal(imported.status, 500);
+  assert.deepEqual(fs.readFileSync(path.join(dataDir, 'generation-jobs.json')), jobsBefore);
+  assert.equal(fs.existsSync(path.join(dataDir, 'result-assets.json')), false);
+  assert.equal((await (await fetch(server.base + '/api/projects/demo/result-assets?includeDeleted=true')).json()).assets.length, 0);
+});
+
 test('task center frontend exposes filters, attempt history, and snapshot-based retry', () => {
   const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.match(source, /data-task-filter="search"/);
@@ -113,6 +207,10 @@ test('task center frontend exposes filters, attempt history, and snapshot-based 
   assert.match(source, /attempt\.attemptId/);
   assert.match(source, /payload\.job\.productImageUrl/);
   assert.match(source, /prompt: payload\.job\.prompt \|\| ''/);
+  assert.match(source, /promptVersion: Number\(result\.promptVersion \|\| promptBVersion\)/);
+  assert.match(source, /dimensions: result\.dimensions/);
+  assert.match(source, /sourceUrl: result\.sourceUrl \|\| result\.url, url: new URL\(uploaded\.url/);
+  assert.match(source, /assetUrl: new URL\(result\.url, window\.location\.href\)\.pathname, sourceUrl: result\.sourceUrl \|\| result\.url/);
   assert.doesNotMatch(source, /retryImageUrl = aReferenceImageUrl \|\| productState\.imageUrl/);
 });
 
