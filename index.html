@@ -213,6 +213,7 @@
       let negativePrompt = '';
       let aspectRatio = '4:5';
       let platformParams = {};
+      let platformOverrides = {};
       let promptBSource = 'workbench';
       let promptBVersion = 1;
       const allowedAspectRatios = ['1:1', '4:5', '3:4', '9:16', '16:9'];
@@ -223,7 +224,7 @@
         if (entries.length > maxPlatformParams) return { ok: false, message: `平台参数最多填写 ${maxPlatformParams} 项` };
         const normalized = {};
         for (const [key, item] of entries) {
-          if (['__proto__', 'constructor', 'prototype'].includes(key)) return { ok: false, message: `平台参数键名“${key}”不允许使用` };
+          if (['__proto__', 'constructor', 'prototype'].includes(key.trim().toLowerCase())) return { ok: false, message: `平台参数键名“${key}”不允许使用` };
           if (!key.trim() || key !== key.trim() || key.length > 80) return { ok: false, message: '平台参数键名不能为空、不能带首尾空格且最多 80 个字符' };
           if (item === null || (typeof item === 'number' && !Number.isFinite(item)) || !['string', 'number', 'boolean'].includes(typeof item)) return { ok: false, message: `平台参数“${key}”的值必须是字符串、有限数字或布尔值` };
           if (typeof item === 'string' && item.length > 500) return { ok: false, message: `平台参数“${key}”的值最多 500 个字符` };
@@ -235,6 +236,27 @@
         const raw = String(rawValue ?? '').trim();
         if (!raw) return { ok: true, value: {} };
         try { return validatePlatformParams(JSON.parse(raw)); } catch { return { ok: false, message: '平台参数不是有效 JSON，请检查括号和引号' }; }
+      };
+      const validatePlatformOverrides = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, message: '平台覆盖参数必须是 JSON 对象' };
+        const entries = Object.entries(value);
+        if (entries.length > Object.keys(generationPlatforms).length) return { ok: false, message: `平台覆盖参数最多填写 ${Object.keys(generationPlatforms).length} 个平台` };
+        const normalized = {};
+        for (const [platform, params] of entries) {
+          const canonicalPlatform = platform.trim().toLowerCase();
+          if (['__proto__', 'constructor', 'prototype'].includes(canonicalPlatform)) return { ok: false, message: `平台覆盖参数键名“${platform}”不允许使用` };
+          if (!platform.trim() || platform !== platform.trim() || platform.length > 80) return { ok: false, message: '平台覆盖参数平台名不能为空、不能带首尾空格且最多 80 个字符' };
+          if (Object.prototype.hasOwnProperty.call(normalized, canonicalPlatform)) return { ok: false, message: `平台覆盖参数包含重复平台键“${platform}”` };
+          const result = validatePlatformParams(params);
+          if (!result.ok) return { ok: false, message: `${platform}：${result.message}` };
+          normalized[canonicalPlatform] = result.value;
+        }
+        return { ok: true, value: normalized };
+      };
+      const parsePlatformOverridesEditor = (rawValue) => {
+        const raw = String(rawValue ?? '').trim();
+        if (!raw) return { ok: true, value: {} };
+        try { return validatePlatformOverrides(JSON.parse(raw)); } catch { return { ok: false, message: '平台覆盖参数不是有效 JSON，请检查括号和引号' }; }
       };
       const validateBExecution = ({ positivePrompt = '', aspectRatio: candidateAspectRatio = '', platformParams: candidatePlatformParams = {} } = {}) => {
         const errors = [];
@@ -297,6 +319,7 @@
             negativePrompt,
             aspectRatio,
             platformParams,
+            platformOverrides,
             promptBSource,
             promptBVersion,
             resultGenerated,
@@ -323,9 +346,9 @@
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
           selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
-          descriptionA, promptB, negativePrompt, aspectRatio, platformParams, promptBSource, promptBVersion, resultGenerated, resultSelected, product: productState, versions,
+          descriptionA, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
-          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, source: promptBSource, version: promptBVersion },
+          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion },
           descriptionAStructured,
           agentWarnings,
           descriptionADraft,
@@ -818,9 +841,10 @@
           negativePrompt,
           aspectRatio,
           platformParams,
+          platformOverrides,
           promptBSource,
           promptBVersion,
-          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, source: promptBSource, version: promptBVersion },
+          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion },
           resultGenerated,
           resultSelected,
           product: { ...productState }
@@ -856,6 +880,12 @@
         agentRunHistory = [];
         latestAgentDraftVersion = 0;
         promptB = '';
+        negativePrompt = '';
+        aspectRatio = '4:5';
+        platformParams = {};
+        platformOverrides = {};
+        promptBSource = 'workbench';
+        promptBVersion = 1;
         resultGenerated = false;
         resultSelected = -1;
         generatedResults = [];
@@ -961,7 +991,7 @@
           setStatus('等待回答');
         }
         if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; refreshAgentWarningPanel(); }
-        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; promptBSource = 'workbench'; promptBVersion = 1; }
+        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; }
         if (stepIndex < 4) {
           resultGenerated = false;
           resultSelected = -1;
@@ -999,6 +1029,28 @@
           picker.querySelector('[data-platform-picker-menu]')?.setAttribute('aria-hidden', 'true');
         });
       };
+      const renderPlatformOverridesEditor = () => {
+        const host = detailContent?.querySelector('#platform-overrides-editor');
+        if (!host) return;
+        const selected = [...selectedGenerationPlatforms];
+        host.innerHTML = selected.length
+          ? `<div class="platform-overrides-heading"><strong>平台覆盖参数</strong><small>可选。覆盖通用平台参数，值支持字符串、数字和布尔值。</small></div>${selected.map((platform) => `<label class="platform-override-field"><span>${escapeHtml(generationPlatforms[platform]?.label || platform)}</span><textarea data-platform-override="${escapeHtml(platform)}" rows="2" spellcheck="false" placeholder="{}">${escapeHtml(JSON.stringify(platformOverrides[platform] || {}, null, 2))}</textarea></label>`).join('')}`
+          : '<small class="platform-overrides-empty">先选择平台，再填写该平台的覆盖参数。</small>';
+      };
+      const readPlatformOverridesEditor = () => {
+        const next = { ...(platformOverrides && typeof platformOverrides === 'object' ? platformOverrides : {}) };
+        const errors = [];
+        detailContent?.querySelectorAll('[data-platform-override]').forEach((editor) => {
+          const platform = editor.dataset.platformOverride;
+          const parsed = parsePlatformParamsEditor(editor.value);
+          if (!parsed.ok) errors.push(`${generationPlatforms[platform]?.label || platform}：${parsed.message}`);
+          else next[platform] = parsed.value;
+        });
+        const validation = validatePlatformOverrides(next);
+        if (!validation.ok) errors.push(validation.message);
+        return { errors, platformOverrides: validation.ok ? validation.value : next };
+      };
+
       const syncPlatformPicker = () => {
         const picker = detailContent?.querySelector('[data-platform-picker]');
         if (!picker) return;
@@ -1045,8 +1097,9 @@
         } else if (stepName === 'b') {
           host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
-          host.innerHTML = `<p class="generation-intro">选择一个或多个平台。每个平台独立检查登录和提交；单个平台失败不会影响其他平台。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '网页扩展' : '网页适配'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">不满意？重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p class="generation-intro">选择一个或多个平台。每个平台独立检查登录和提交；单个平台失败不会影响其他平台。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '网页扩展' : '网页适配'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">不满意？重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
+          renderPlatformOverridesEditor();
           renderPlatformStatuses();
           if (resultGenerated) renderResults();
         }
@@ -1689,7 +1742,10 @@
         if (agentBusy || interrupted) return;
         const executionValidation = validateBExecution({ positivePrompt: promptB, aspectRatio, platformParams });
         if (executionValidation.errors.length) { showToast(executionValidation.errors[0]); return; }
+        const overrideValidation = readPlatformOverridesEditor();
+        if (overrideValidation.errors.length) { showToast(overrideValidation.errors[0]); return; }
         platformParams = executionValidation.platformParams;
+        platformOverrides = overrideValidation.platformOverrides;
         const attemptId = ++doubaoAttemptId;
         if (!generationRequestKey) generationRequestKey = window.crypto?.randomUUID?.() || `generation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
         const platforms = [...selectedGenerationPlatforms];
@@ -1713,7 +1769,7 @@
           const response = await fetch(`${projectApiUrl}/generation-jobs`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Idempotency-Key': generationRequestKey },
-            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, bSnapshot: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, source: promptBSource, version: promptBVersion }, ...(imageUrlAbsolute ? { referenceImageUrl: imageUrlAbsolute, productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
+            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, bSnapshot: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion }, ...(imageUrlAbsolute ? { referenceImageUrl: imageUrlAbsolute, productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
@@ -1725,7 +1781,7 @@
           });
           persistState();
           platforms.forEach((platform) => {
-            window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, negativePrompt, aspectRatio, platformParams, referenceImageUrl: imageUrlAbsolute, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
+            window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, negativePrompt, aspectRatio, platformParams: payload.job.platforms?.[platform]?.platformParams || {}, platformOverrides, referenceImageUrl: imageUrlAbsolute, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
           });
         } catch (error) {
           doubaoBridgeState = 'error';
@@ -1963,10 +2019,23 @@
         if (bridgeAction === 'help') openDoubaoHelp();
         if (bridgeAction === 'manual-result') detailContent.querySelector('#result-upload-input')?.click();
       });
+      detailContent.addEventListener('input', (event) => {
+        const editor = event.target.closest('[data-platform-override]');
+        if (!editor) return;
+        const parsed = parsePlatformParamsEditor(editor.value);
+        if (!parsed.ok) return;
+        const next = { ...(platformOverrides || {}), [editor.dataset.platformOverride]: parsed.value };
+        const validation = validatePlatformOverrides(next);
+        if (!validation.ok) return;
+        platformOverrides = validation.value;
+        persistState();
+        syncProject();
+      });
       detailContent.addEventListener('change', (event) => {
         if (event.target.matches('input[name="generation-platform"]')) {
           selectedGenerationPlatforms = new Set([...detailContent.querySelectorAll('input[name="generation-platform"]:checked')].map((input) => input.value));
           syncPlatformPicker();
+          renderPlatformOverridesEditor();
           renderPlatformStatuses();
           persistState();
           return;
@@ -2215,6 +2284,7 @@
           negativePrompt = saved.negativePrompt || savedB.negative_prompt || savedB.negativePrompt || '';
           aspectRatio = allowedAspectRatios.includes(saved.aspectRatio || savedB.aspect_ratio) ? (saved.aspectRatio || savedB.aspect_ratio) : '4:5';
           platformParams = saved.platformParams && typeof saved.platformParams === 'object' ? saved.platformParams : (savedB.platform_params && typeof savedB.platform_params === 'object' ? savedB.platform_params : {});
+          platformOverrides = saved.platformOverrides && typeof saved.platformOverrides === 'object' ? saved.platformOverrides : (savedB.platform_overrides && typeof savedB.platform_overrides === 'object' ? savedB.platform_overrides : {});
           promptBSource = String(saved.promptBSource || savedB.source || 'workbench').slice(0, 80) || 'workbench';
           promptBVersion = Math.max(1, Number(saved.promptBVersion || savedB.version) || 1);
           resultGenerated = Boolean(saved.resultGenerated);

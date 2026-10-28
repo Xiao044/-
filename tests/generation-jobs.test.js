@@ -394,6 +394,83 @@ test('generation POST strictly validates new B snapshots while preserving legacy
   assert.deepEqual(legacyJob.platformParams, {});
 });
 
+test('project persistence stores platform override snapshots in both naming forms', async (t) => {
+  const server = await startServer(t);
+  const project = {
+    promptBExecution: {
+      positive_prompt: 'project prompt',
+      negative_prompt: '',
+      aspect_ratio: '4:5',
+      platform_params: { seed: 1 },
+      platform_overrides: { doubao: { seed: 9 } },
+      source: 'test',
+      version: 2
+    }
+  };
+  const saved = await json(server.base, '/api/projects/demo', { method: 'PUT', body: JSON.stringify(project) });
+  assert.equal(saved.status, 200);
+  const persisted = (await saved.json()).project;
+  assert.deepEqual(persisted.platformOverrides, { doubao: { seed: 9 } });
+  assert.deepEqual(persisted.promptBExecution.platform_overrides, { doubao: { seed: 9 } });
+});
+
+test('generation jobs resolve and persist per-platform parameter overrides across restart', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-generation-overrides-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, { dataDir });
+  const response = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      platforms: ['doubao', 'gemini'],
+      bSnapshot: {
+        positive_prompt: 'override prompt',
+        negative_prompt: '',
+        aspect_ratio: '4:5',
+        platform_params: { seed: 42, quality: 'standard' },
+        platform_overrides: { doubao: { quality: 'turbo', watermark: false }, gemini: { seed: 7 } }
+      }
+    })
+  });
+  assert.equal(response.status, 201);
+  const job = (await response.json()).job;
+  assert.deepEqual(job.platformOverrides, { doubao: { quality: 'turbo', watermark: false }, gemini: { seed: 7 } });
+  assert.deepEqual(job.platforms.doubao.platformParams, { seed: 42, quality: 'turbo', watermark: false });
+  assert.deepEqual(job.platforms.gemini.platformParams, { seed: 7, quality: 'standard' });
+  server.child.kill();
+  await new Promise((resolve) => server.child.once('exit', resolve));
+  const restarted = await startServer(t, { dataDir });
+  const persisted = (await (await fetch(`${restarted.base}/api/projects/demo/generation-jobs/${job.jobId}`)).json()).job;
+  assert.deepEqual(persisted.bSnapshot.platform_overrides, job.bSnapshot.platform_overrides);
+  assert.deepEqual(persisted.platforms.doubao.platformParams, job.platforms.doubao.platformParams);
+  assert.deepEqual(persisted.platforms.gemini.platformParams, job.platforms.gemini.platformParams);
+});
+
+test('generation POST rejects invalid platform override maps and preserves legacy defaults', async (t) => {
+  const server = await startServer(t);
+  const invalidOverrideCases = [
+    { platform_overrides: null },
+    { platform_overrides: { doubao: { seed: { nested: true } } } },
+    { platform_overrides: JSON.parse('{"doubao":{"__PrOtO__":"blocked"}}') },
+    { platform_overrides: JSON.parse('{"__PROTO__":{}}') },
+    { platform_overrides: { DOUBAO: {}, doubao: {} } },
+    { platform_params: JSON.parse('{"__PrOtO__":"blocked"}') }
+  ];
+  for (const fields of invalidOverrideCases) {
+    const response = await json(server.base, '/api/projects/demo/generation-jobs', {
+      method: 'POST', body: JSON.stringify({ platforms: ['doubao'], bSnapshot: { positive_prompt: 'bad override', aspect_ratio: '4:5', ...fields } })
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).errorCode, fields.platform_params ? 'INVALID_PLATFORM_PARAMS' : 'INVALID_PLATFORM_OVERRIDES');
+  }
+  const legacy = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: 'legacy override prompt', platformParams: { seed: 3 } })
+  });
+  assert.equal(legacy.status, 201);
+  const job = (await legacy.json()).job;
+  assert.deepEqual(job.platformOverrides, {});
+  assert.deepEqual(job.platforms.doubao.platformParams, { seed: 3 });
+});
+
 test('generation POST rejects an empty positive or raw prompt', async (t) => {
   const server = await startServer(t);
   const response = await json(server.base, '/api/projects/demo/generation-jobs', { method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: '   ' }) });
@@ -414,6 +491,19 @@ test('frontend guards A and B semantic minimums and orders A image reset after u
   assert.match(source, /promptBExecution/);
   assert.match(source, /platform-params-editor/);
   assert.match(source, /parsePlatformParamsEditor/);
+  assert.match(source, /platform-overrides-editor/);
+  assert.match(source, /validatePlatformOverrides/);
+  assert.match(source, /platform_overrides/);
+  assert.match(source, /platformParams: payload\.job\.platforms\?\.\[platform\]\?\.platformParams/);
+  assert.match(source, /platformOverrides,?\s*promptBSource/);
+  assert.match(source, /platform_overrides: platformOverrides/);
+  assert.match(source, /platformParams = \{\}; platformOverrides = \{\};/);
+  assert.match(source, /selectedGenerationPlatforms = new Set\([\s\S]{0,220}renderPlatformOverridesEditor\(\)/);
+  assert.match(source, /detailContent.addEventListener\('input',[\s\S]{0,450}platformOverrides = validation.value/);
   assert.match(source, /validateBExecution/);
   assert.match(source, /JSON.stringify\(bFields\.platformParams\)/);
+  const createProjectStart = source.indexOf('const createProject = async');
+  const createProjectEnd = source.indexOf('const defaultDescription', createProjectStart);
+  const createProjectBlock = source.slice(createProjectStart, createProjectEnd);
+  assert.match(createProjectBlock, /promptB = '';[\s\S]{0,260}negativePrompt = '';[\s\S]{0,120}aspectRatio = '4:5';[\s\S]{0,120}platformParams = \{\};[\s\S]{0,120}platformOverrides = \{\};[\s\S]{0,120}promptBSource = 'workbench';[\s\S]{0,120}promptBVersion = 1;/);
 });

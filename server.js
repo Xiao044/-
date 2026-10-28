@@ -39,33 +39,64 @@ const projectIdPattern = /^[A-Za-z0-9_\-\u4e00-\u9fff]{1,80}$/;
 const isValidProjectId = (value) => Boolean(value && projectIdPattern.test(value));
 const ASPECT_RATIOS = new Set(['1:1', '4:5', '3:4', '9:16', '16:9']);
 const MAX_PLATFORM_PARAMS = 30;
+const MAX_PLATFORM_OVERRIDES = 4;
 const limitJobString = (value, max) => String(value ?? '').trim().slice(0, max);
 const normalizePlatformParams = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).slice(0, MAX_PLATFORM_PARAMS)
     .map(([key, item]) => [limitJobString(key, 80), typeof item === 'number' || typeof item === 'boolean' ? item : limitJobString(item, 500)])
-    .filter(([key]) => key));
+    .filter(([key]) => key && !isReservedPlatformParamKey(key)));
 };
 const hasOwn = (value, key) => Boolean(value && Object.prototype.hasOwnProperty.call(value, key));
 const isPlainObject = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
-const strictPlatformParams = (value) => {
+const RESERVED_PLATFORM_PARAM_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const isReservedPlatformParamKey = (key) => RESERVED_PLATFORM_PARAM_KEYS.has(String(key ?? '').trim().toLowerCase());
+const strictPlatformParams = (value, fieldName = 'platformParams') => {
   if (value === undefined) return { ok: true, value: {} };
-  if (!isPlainObject(value)) return { ok: false, message: 'platformParams must be a JSON object.' };
+  if (!isPlainObject(value)) return { ok: false, message: `${fieldName} must be a JSON object.` };
   const entries = Object.entries(value);
-  if (entries.length > MAX_PLATFORM_PARAMS) return { ok: false, message: `platformParams supports at most ${MAX_PLATFORM_PARAMS} entries.` };
+  if (entries.length > MAX_PLATFORM_PARAMS) return { ok: false, message: `${fieldName} supports at most ${MAX_PLATFORM_PARAMS} entries.` };
   const normalized = {};
   for (const [rawKey, item] of entries) {
     const key = String(rawKey);
-    if (['__proto__', 'constructor', 'prototype'].includes(key)) return { ok: false, message: `platformParams key "${key}" is not allowed.` };
-    if (!key.trim() || key !== key.trim() || key.length > 80) return { ok: false, message: 'platformParams keys must be non-empty and at most 80 characters.' };
+    if (isReservedPlatformParamKey(key)) return { ok: false, message: `${fieldName} key "${key}" is not allowed.` };
+    if (!key.trim() || key !== key.trim() || key.length > 80) return { ok: false, message: `${fieldName} keys must be non-empty and at most 80 characters.` };
     if (item === null || (typeof item === 'number' && !Number.isFinite(item)) || !['string', 'number', 'boolean'].includes(typeof item)) {
-      return { ok: false, message: `platformParams value for "${key}" must be a string, finite number, or boolean.` };
+      return { ok: false, message: `${fieldName} value for "${key}" must be a string, finite number, or boolean.` };
     }
-    if (typeof item === 'string' && item.length > 500) return { ok: false, message: `platformParams value for "${key}" is too long.` };
+    if (typeof item === 'string' && item.length > 500) return { ok: false, message: `${fieldName} value for "${key}" is too long.` };
     normalized[key] = item;
   }
   return { ok: true, value: normalized };
 };
+const normalizePlatformOverrides = (value) => {
+  if (!isPlainObject(value)) return {};
+  return Object.fromEntries(Object.entries(value).slice(0, MAX_PLATFORM_OVERRIDES)
+    .map(([platform, params]) => [String(platform).trim().toLowerCase(), normalizePlatformParams(params)])
+    .filter(([platform]) => platform && !isReservedPlatformParamKey(platform)));
+};
+const strictPlatformOverrides = (value) => {
+  if (value === undefined) return { ok: true, value: {} };
+  if (!isPlainObject(value)) return { ok: false, message: 'platformOverrides must be a JSON object.' };
+  const entries = Object.entries(value);
+  if (entries.length > MAX_PLATFORM_OVERRIDES) return { ok: false, message: `platformOverrides supports at most ${MAX_PLATFORM_OVERRIDES} platforms.` };
+  const normalized = {};
+  for (const [rawPlatform, params] of entries) {
+    const platform = String(rawPlatform);
+    const canonicalPlatform = platform.trim().toLowerCase();
+    if (isReservedPlatformParamKey(platform)) return { ok: false, message: `platformOverrides key "${platform}" is not allowed.` };
+    if (!platform.trim() || platform !== platform.trim() || platform.length > 80) return { ok: false, message: 'platformOverrides keys must be non-empty and at most 80 characters.' };
+    if (hasOwn(normalized, canonicalPlatform)) return { ok: false, message: `platformOverrides contains duplicate platform key "${platform}".` };
+    const result = strictPlatformParams(params, `platformOverrides.${platform}`);
+    if (!result.ok) return result;
+    normalized[canonicalPlatform] = result.value;
+  }
+  return { ok: true, value: normalized };
+};
+const resolvePlatformParams = (platformParams = {}, platformOverrides = {}, platform = '') => ({
+  ...normalizePlatformParams(platformParams),
+  ...normalizePlatformParams(platformOverrides?.[String(platform).toLowerCase()])
+});
 const strictBExecution = (input = {}) => {
   if (!hasOwn(input, 'bSnapshot')) return { ok: true, legacy: true, value: normalizeBExecution(input) };
   if (!isPlainObject(input.bSnapshot)) return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot must be a JSON object.' };
@@ -94,6 +125,9 @@ const strictBExecution = (input = {}) => {
   const paramsSource = hasOwn(source, 'platform_params') ? source.platform_params : undefined;
   const params = strictPlatformParams(paramsSource);
   if (!params.ok) return { ok: false, code: 'INVALID_PLATFORM_PARAMS', message: params.message };
+  const overridesSource = hasOwn(source, 'platform_overrides') ? source.platform_overrides : (hasOwn(source, 'platformOverrides') ? source.platformOverrides : undefined);
+  const overrides = strictPlatformOverrides(overridesSource);
+  if (!overrides.ok) return { ok: false, code: 'INVALID_PLATFORM_OVERRIDES', message: overrides.message };
   const version = hasOwn(source, 'version') ? Math.max(1, Math.min(999999, source.version)) : 1;
   return {
     ok: true,
@@ -103,6 +137,7 @@ const strictBExecution = (input = {}) => {
       negativePrompt: source.negative_prompt ?? '',
       aspectRatio: source.aspect_ratio,
       platformParams: params.value,
+      platformOverrides: overrides.value,
       source: source.source ?? 'workbench',
       version
     }
@@ -130,12 +165,13 @@ const normalizeBExecution = (input = {}) => {
     ? String(source.aspect_ratio ?? source.aspectRatio ?? input.aspectRatio)
     : '4:5';
   const platformParams = normalizePlatformParams(source.platform_params ?? source.platformParams ?? input.platformParams);
+  const platformOverrides = normalizePlatformOverrides(source.platform_overrides ?? source.platformOverrides ?? input.platformOverrides);
   const version = Math.max(1, Math.min(999999, Number(source.version ?? input.promptBVersion ?? input.version) || 1));
   const metadata = {
     source: limitJobString(source.source ?? input.promptBSource ?? input.source ?? 'workbench', 80) || 'workbench',
     version
   };
-  return { positivePrompt, negativePrompt, aspectRatio, platformParams, ...metadata };
+  return { positivePrompt, negativePrompt, aspectRatio, platformParams, platformOverrides, ...metadata };
 };
 
 const mimeTypes = {
@@ -233,11 +269,12 @@ const handleProject = async (req, res) => {
       ? normalizeBExecution({ ...project, ...project.promptBExecution })
       : null;
     if (projectB) {
-      project.promptBExecution = { positive_prompt: projectB.positivePrompt, negative_prompt: projectB.negativePrompt, aspect_ratio: projectB.aspectRatio, platform_params: projectB.platformParams, source: projectB.source, version: projectB.version };
+      project.promptBExecution = { positive_prompt: projectB.positivePrompt, negative_prompt: projectB.negativePrompt, aspect_ratio: projectB.aspectRatio, platform_params: projectB.platformParams, platform_overrides: projectB.platformOverrides, source: projectB.source, version: projectB.version };
       project.promptB = projectB.positivePrompt;
       project.negativePrompt = projectB.negativePrompt;
       project.aspectRatio = projectB.aspectRatio;
       project.platformParams = projectB.platformParams;
+      project.platformOverrides = projectB.platformOverrides;
       project.promptBSource = projectB.source;
       project.promptBVersion = projectB.version;
     }
@@ -339,7 +376,7 @@ const normalizeResultReference = (result) => {
   };
 };
 
-const normalizePlatformEntry = (entry, jobId, platform) => {
+const normalizePlatformEntry = (entry, jobId, platform, fallbackPlatformParams = {}) => {
   const source = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
   const attemptCount = Math.max(1, Number(source.attemptCount) || 1);
   const status = PLATFORM_STATUSES.has(source.status) ? source.status : 'queued';
@@ -347,6 +384,7 @@ const normalizePlatformEntry = (entry, jobId, platform) => {
   const savedResults = Array.isArray(source.savedResults) ? source.savedResults.map(normalizeResultReference).filter(Boolean).slice(0, 12) : [];
   const attemptId = String(source.attemptId || `${jobId}:${platform}:${attemptCount}`).slice(0, 160);
   const attempts = Array.isArray(source.attempts) ? source.attempts.slice(-12) : [];
+  const platformParams = normalizePlatformParams(source.platformParams ?? source.platform_params ?? fallbackPlatformParams);
   return {
     ...source,
     status,
@@ -356,6 +394,7 @@ const normalizePlatformEntry = (entry, jobId, platform) => {
     attemptId,
     attemptCount,
     attempts,
+    platformParams,
     startedAt: source.startedAt || null,
     lastAttemptAt: source.lastAttemptAt || source.updatedAt || null,
     updatedAt: source.updatedAt || source.lastAttemptAt || null,
@@ -371,8 +410,9 @@ const normalizeGenerationJob = (job) => {
   const bExecution = normalizeBExecution(job);
   const referenceImageUrl = normalizeReferenceImageUrl(job);
   const platforms = job.platforms && typeof job.platforms === 'object' && !Array.isArray(job.platforms)
-    ? Object.fromEntries(Object.entries(job.platforms).map(([platform, entry]) => [platform, normalizePlatformEntry(entry, jobId, platform)]))
+    ? Object.fromEntries(Object.entries(job.platforms).map(([platform, entry]) => [platform, normalizePlatformEntry(entry, jobId, platform, resolvePlatformParams(bExecution.platformParams, bExecution.platformOverrides, platform))]))
     : {};
+  const includePlatformOverridesInSnapshot = hasOwn(job.bSnapshot, 'platform_overrides') || hasOwn(job.bSnapshot, 'platformOverrides');
   const normalized = {
     ...job,
     prompt: bExecution.positivePrompt,
@@ -380,11 +420,13 @@ const normalizeGenerationJob = (job) => {
     negativePrompt: bExecution.negativePrompt,
     aspectRatio: bExecution.aspectRatio,
     platformParams: bExecution.platformParams,
+    platformOverrides: bExecution.platformOverrides,
     bSnapshot: {
       positive_prompt: bExecution.positivePrompt,
       negative_prompt: bExecution.negativePrompt,
       aspect_ratio: bExecution.aspectRatio,
       platform_params: bExecution.platformParams,
+      ...(includePlatformOverridesInSnapshot ? { platform_overrides: bExecution.platformOverrides } : {}),
       source: bExecution.source,
       version: bExecution.version
     },
@@ -429,6 +471,7 @@ const handleGenerationJobsUnsafe = async (req, res) => {
     }
     const bExecution = executionValidation.value;
     const bSource = input.bSnapshot && typeof input.bSnapshot === 'object' ? input.bSnapshot : input;
+    const includePlatformOverridesInSnapshot = hasOwn(bSource, 'platform_overrides') || hasOwn(bSource, 'platformOverrides');
     const rawPositivePrompt = bSource.positive_prompt ?? bSource.positivePrompt ?? (input.bSnapshot ? '' : input.prompt);
     if (!bExecution.positivePrompt || typeof rawPositivePrompt !== 'string' || !rawPositivePrompt.trim() || rawPositivePrompt.length > 12000) {
       sendJson(res, 400, { error: 'A prompt of up to 12000 characters is required.' });
@@ -450,11 +493,13 @@ const handleGenerationJobsUnsafe = async (req, res) => {
       negativePrompt: bExecution.negativePrompt,
       aspectRatio: bExecution.aspectRatio,
       platformParams: bExecution.platformParams,
+      platformOverrides: bExecution.platformOverrides,
       bSnapshot: {
         positive_prompt: bExecution.positivePrompt,
         negative_prompt: bExecution.negativePrompt,
         aspect_ratio: bExecution.aspectRatio,
         platform_params: bExecution.platformParams,
+        ...(includePlatformOverridesInSnapshot ? { platform_overrides: bExecution.platformOverrides } : {}),
         source: bExecution.source,
         version: bExecution.version
       },
@@ -482,7 +527,8 @@ const handleGenerationJobsUnsafe = async (req, res) => {
           updatedAt: now,
           results: [],
           resultRefs: [],
-          savedResults: []
+          savedResults: [],
+          platformParams: resolvePlatformParams(bExecution.platformParams, bExecution.platformOverrides, platform)
         }
       })).map(({ platform, value }) => [platform, value]))
     };

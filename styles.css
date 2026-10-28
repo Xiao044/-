@@ -245,6 +245,14 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
 .platform-picker label { display: inline-flex; align-items: center; gap: 6px; color: #39372f; font-size: 13px; cursor: pointer; }
 .platform-picker input { accent-color: #537b5c; }
 .platform-status-list { display: grid; gap: 5px; margin: 10px 0; }
+
+.platform-overrides-editor { display: grid; gap: 8px; margin: 9px 0 12px; padding: 10px 12px; border: 1px solid #e7dfc9; border-radius: 9px; background: #fffdf6; }
+.platform-overrides-heading { display: grid; gap: 2px; color: #655b42; font-size: 12px; }
+.platform-overrides-heading small, .platform-overrides-empty { color: #8b8065; font-size: 11px; line-height: 1.4; }
+.platform-override-field { display: grid; gap: 4px; }
+.platform-override-field > span { color: #706648; font-size: 11px; font-weight: 600; }
+.platform-override-field textarea { width: 100%; min-height: 45px; resize: vertical; border: 1px solid #ded9ca; border-radius: 6px; background: #fff; color: #39372f; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 7px 8px; }
+.platform-override-field textarea:focus { border-color: #cdbb78; outline: 0; box-shadow: 0 0 0 3px rgba(239, 215, 121, .18); }
 .platform-status-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-left: 3px solid #d5cda9; background: #f7f5ed; font-size: 12px; }
 .platform-status-row strong { flex: 0 0 auto; }
 .platform-status-row span { color: #706648; text-align: right; }
