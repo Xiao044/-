@@ -39,8 +39,13 @@ const generationJobsPath = path.join(dataDir, 'generation-jobs.json');
 const resultAssetsPath = path.join(dataDir, 'result-assets.json');
 const uploadsDir = path.join(dataDir, 'uploads');
 const assetsDir = path.join(root, 'assets');
+const configuredImportMaxBytes = process.env.ZAOTU_IMPORT_MAX_BYTES ?? process.env.PROJECT_IMPORT_MAX_BYTES ?? process.env.IMPORT_MAX_BYTES;
+const importMaxBytes = Number.isFinite(Number(configuredImportMaxBytes)) && Number(configuredImportMaxBytes) > 0
+  ? Number(configuredImportMaxBytes) : 8 * 1024 * 1024;
+const exportImportSchemaVersion = 1;
 const projectIdPattern = /^[A-Za-z0-9_\-\u4e00-\u9fff]{1,80}$/;
-const isValidProjectId = (value) => Boolean(value && projectIdPattern.test(value));
+const RESERVED_PROJECT_IDS = new Set(['__proto__', 'constructor', 'prototype']);
+const isValidProjectId = (value) => Boolean(value && projectIdPattern.test(value) && !RESERVED_PROJECT_IDS.has(value));
 const ASPECT_RATIOS = new Set(['1:1', '4:5', '3:4', '9:16', '16:9']);
 const MAX_PLATFORM_PARAMS = 30;
 const MAX_PLATFORM_OVERRIDES = 4;
@@ -430,12 +435,326 @@ const writeResultAssets = (assets) => {
 
 const createResultAssetId = () => `asset-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 
+const IMPORT_JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const IMPORT_ASSET_ID_PATTERN = /^asset-[A-Za-z0-9-]{8,120}$/;
+const encodedUploadPrefix = (projectId) => `/uploads/${encodeURIComponent(projectId)}/`;
+const isSafeUploadReference = (value, projectId) => {
+  if (typeof value !== 'string' || !value.startsWith(encodedUploadPrefix(projectId))) return false;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return false;
+  const relative = value.slice(encodedUploadPrefix(projectId).length);
+  if (!relative || relative.includes('..') || relative.includes('\\') || relative.includes('?') || relative.includes('#')) return false;
+  let decoded;
+  try { decoded = decodeURIComponent(relative); } catch { return false; }
+  if ([value, decoded].some((item) => /[\u0000-\u001f\u007f]/.test(item))) return false;
+  if (!decoded || decoded.includes('..') || decoded.includes('\\') || path.posix.normalize(decoded) !== decoded || decoded.startsWith('/')) return false;
+  const rootPath = path.resolve(uploadsDir, projectId);
+  const candidate = path.resolve(rootPath, decoded);
+  const relativePath = path.relative(rootPath, candidate);
+  if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath) && fs.existsSync(candidate)) {
+    const resolved = resolveUploadFilePath(value);
+    if (!resolved) return false;
+  }
+  return Boolean(relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+};
+const validateImportedPaths = (value, projectId, currentPath = '') => {
+  if (typeof value === 'string' && value.startsWith('/uploads/')) {
+    return isSafeUploadReference(value, projectId)
+      ? null : `${currentPath || 'value'} contains an upload path outside project ${projectId}.`;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const error = validateImportedPaths(value[index], projectId, `${currentPath}[${index}]`);
+      if (error) return error;
+    }
+    return null;
+  }
+  if (isPlainObject(value)) {
+    for (const [key, item] of Object.entries(value)) {
+      const error = validateImportedPaths(item, projectId, currentPath ? `${currentPath}.${key}` : key);
+      if (error) return error;
+    }
+  }
+  return null;
+};
+const collectUploadReferences = (value, references = new Set()) => {
+  if (typeof value === 'string' && value.startsWith('/uploads/')) references.add(value);
+  else if (Array.isArray(value)) value.forEach((item) => collectUploadReferences(item, references));
+  else if (isPlainObject(value)) Object.values(value).forEach((item) => collectUploadReferences(item, references));
+  return references;
+};
+const uploadManifestForReferences = (references) => [...references].sort().map((uploadPath) => {
+  const filePath = resolveUploadFilePath(uploadPath);
+  if (!filePath || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) return { path: uploadPath, missing: true };
+  const bytes = fs.readFileSync(filePath);
+  return { path: uploadPath, size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+});
+const resolveUploadFilePath = (uploadPath) => {
+  const projectMatch = typeof uploadPath === 'string' && uploadPath.match(/^\/uploads\/([^/]+)\/(.+)$/);
+  if (!projectMatch) return null;
+  let projectPart;
+  let relative;
+  try {
+    projectPart = decodeURIComponent(projectMatch[1]);
+    relative = decodeURIComponent(projectMatch[2]);
+  } catch { return null; }
+  if (!projectPart || !relative || !isValidProjectId(projectPart) || [uploadPath, projectPart, relative].some((item) => /[\u0000-\u001f\u007f]/.test(item))) return null;
+  const rootPath = path.resolve(uploadsDir, projectPart);
+  const filePath = path.resolve(rootPath, relative);
+  const relativePath = path.relative(rootPath, filePath);
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) return null;
+  if (!fs.existsSync(filePath)) return filePath;
+  let realPath;
+  let realRoot;
+  let realUploadsRoot;
+  try {
+    realPath = fs.realpathSync(filePath);
+    realRoot = fs.realpathSync(rootPath);
+    realUploadsRoot = fs.realpathSync(uploadsDir);
+  } catch { return null; }
+  const projectRelative = path.relative(realUploadsRoot, realRoot);
+  const realRelative = path.relative(realRoot, realPath);
+  return projectRelative && !projectRelative.startsWith('..') && !path.isAbsolute(projectRelative)
+    && realRelative && !realRelative.startsWith('..') && !path.isAbsolute(realRelative) ? filePath : null;
+};
+const cloneStoreState = (storePath) => {
+  try { return { ok: true, state: readFileState(storePath) }; }
+  catch (error) { return { ok: false, error }; }
+};
+const restoreStoreStates = (states) => {
+  const errors = [];
+  for (const [filePath, snapshot] of states) {
+    if (!snapshot.ok) {
+      errors.push({ filePath, error: snapshot.error });
+      continue;
+    }
+    try { restoreFileState(filePath, snapshot.state); }
+    catch (error) { errors.push({ filePath, error }); }
+  }
+  return errors;
+};
+const readImportBody = (req) => new Promise((resolve, reject) => {
+  const chunks = [];
+  let total = 0;
+  let tooLarge = false;
+  req.on('data', (chunk) => {
+    total += chunk.length;
+    if (!tooLarge && total > importMaxBytes) tooLarge = true;
+    if (!tooLarge) chunks.push(chunk);
+  });
+  req.on('end', () => tooLarge ? reject(Object.assign(new Error('import body too large'), { code: 'IMPORT_TOO_LARGE' })) : resolve(Buffer.concat(chunks).toString('utf8')));
+  req.on('error', reject);
+});
+const importProjectIdFromRequest = (req) => {
+  const match = req.url.match(/^\/api\/projects\/([^/?]+)\/import(?:\?.*)?$/);
+  return match ? decodeRoutePart(match[1]) : '';
+};
+const exportProjectIdFromRequest = (req) => {
+  const match = req.url.match(/^\/api\/projects\/([^/?]+)\/export(?:\?.*)?$/);
+  return match ? decodeRoutePart(match[1]) : '';
+};
+
+let projectDataMutationTail = Promise.resolve();
+const projectImportRevisions = new Map();
+const getProjectImportRevision = (projectId) => projectImportRevisions.get(projectId) || 0;
+const withProjectDataMutation = (operation) => {
+  const run = projectDataMutationTail.then(operation);
+  projectDataMutationTail = run.catch(() => {});
+  return run;
+};
+
+const handleProjectExport = async (req, res) => {
+  const projectId = exportProjectIdFromRequest(req);
+  if (!isValidProjectId(projectId)) { sendJson(res, 400, { error: 'Invalid project id.' }); return; }
+  const projects = readProjectStore();
+  const project = projects[projectId];
+  if (!project || !isPlainObject(project)) { sendJson(res, 404, { error: 'Project not found.' }); return; }
+  const versions = readProjectVersions()[projectId] || [];
+  const allJobs = readGenerationJobs();
+  const jobs = [];
+  const warnings = [];
+  for (const [key, job] of Object.entries(allJobs)) {
+    if (job?.projectId === projectId) jobs.push(cloneJson(job));
+    else if (job && !job.projectId && key.startsWith(projectId + ':')) {
+      warnings.push({ code: 'LEGACY_JOB_PROJECT_ID_MISSING', jobId: job.jobId || key, message: 'A legacy job was omitted because it has no projectId.' });
+    }
+  }
+  const conflictingAssetIds = new Set();
+  let rawProjectAssets = {};
+  const normalizedProjectAssets = readResultAssets()[projectId] || {};
+  try {
+    const rawAssets = fs.existsSync(resultAssetsPath) ? JSON.parse(fs.readFileSync(resultAssetsPath, 'utf8')) : {};
+    rawProjectAssets = isPlainObject(rawAssets?.[projectId]) ? rawAssets[projectId] : {};
+    for (const [assetId, asset] of Object.entries(rawProjectAssets)) {
+      if (!isPlainObject(asset)) continue;
+      if (!asset.projectId) {
+        warnings.push({ code: 'LEGACY_ASSET_PROJECT_ID_MISSING', assetId, message: 'A legacy asset was normalized from its project store key.' });
+      } else if (asset.projectId !== projectId) {
+        conflictingAssetIds.add(assetId);
+        warnings.push({ code: 'LEGACY_ASSET_PROJECT_ID_CONFLICT', assetId, projectId: asset.projectId, message: 'A legacy asset with conflicting nested projectId was omitted.' });
+      }
+    }
+  } catch (error) {
+    warnings.push({ code: 'ASSET_STORE_READ_FAILED', message: 'The legacy asset store could not be inspected for ownership warnings.' });
+  }
+  const assets = Object.entries(normalizedProjectAssets)
+    .filter(([assetId, asset]) => asset && asset.projectId === projectId && !conflictingAssetIds.has(assetId))
+    .map(([, asset]) => cloneJson(asset));
+  const exportedProject = { ...cloneJson(project), projectId };
+  const exportedVersions = versions.filter((version) => version && (!version.projectId || version.projectId === projectId)).map((version) => ({ ...cloneJson(version), projectId }));
+  if (!project.projectId) warnings.push({ code: 'LEGACY_PROJECT_ID_MISSING', message: 'The projectId was normalized from its project store key.' });
+  else if (project.projectId !== projectId) warnings.push({ code: 'LEGACY_PROJECT_ID_CONFLICT', projectId: project.projectId, message: 'The projectId was normalized from the project store key.' });
+  const unsafeAssetIds = new Set();
+  for (const [assetId, asset] of Object.entries(rawProjectAssets)) {
+    if (!isPlainObject(asset)) continue;
+    const references = [asset.url, asset.archivedUrl, asset.thumbnailUrl, asset.sourceUrl];
+    if (references.some((reference) => typeof reference === 'string' && reference.startsWith('/uploads/') && !isSafeUploadReference(reference, projectId))) {
+      unsafeAssetIds.add(assetId);
+      warnings.push({ code: 'LEGACY_ASSET_REFERENCE_UNSAFE', assetId, message: 'A legacy asset with an unsafe upload reference was omitted.' });
+    }
+  }
+  const safeAssets = assets.filter((asset) => !unsafeAssetIds.has(asset.assetId));
+  const references = collectUploadReferences([exportedProject, exportedVersions, jobs, safeAssets]);
+  sendJson(res, 200, {
+    schemaVersion: exportImportSchemaVersion,
+    projectId,
+    project: [exportedProject],
+    versions: exportedVersions,
+    jobs,
+    assets: safeAssets,
+    uploads: uploadManifestForReferences(references),
+    warnings
+  });
+};
+
+const importError = (message, code = 'INVALID_IMPORT') => Object.assign(new Error(message), { code });
+const validateImportEnvelope = (body, routeProjectId) => {
+  if (!isPlainObject(body)) throw importError('Import payload must be an object.');
+  if (body.schemaVersion !== exportImportSchemaVersion) throw importError('Unsupported import schemaVersion.');
+  if (body.projectId !== undefined && body.projectId !== routeProjectId) throw importError('Imported project ownership does not match the route.');
+  const projects = Array.isArray(body.project) ? body.project : (isPlainObject(body.project) ? [body.project] : null);
+  if (!projects || projects.length !== 1 || !isPlainObject(projects[0])) throw importError('Import payload must contain exactly one project.');
+  const project = cloneJson(projects[0]);
+  if (project.projectId !== routeProjectId || !isValidProjectId(project.projectId)) throw importError('Imported project ownership does not match the route.');
+  const pathError = validateImportedPaths(project, routeProjectId);
+  if (pathError) throw importError(pathError);
+  const versions = body.versions === undefined ? [] : body.versions;
+  const jobs = body.jobs === undefined ? [] : body.jobs;
+  const assets = body.assets === undefined ? [] : body.assets;
+  if (!Array.isArray(versions) || !Array.isArray(jobs) || !Array.isArray(assets)) throw importError('versions, jobs, and assets must be arrays.');
+  const seenVersions = new Set();
+  const cleanVersions = versions.map((version, index) => {
+    if (!isPlainObject(version) || !isValidVersionId(version.versionId) || (version.projectId !== undefined && version.projectId !== routeProjectId)) throw importError(`Invalid version at index ${index}.`);
+    if (seenVersions.has(version.versionId)) throw importError(`Duplicate version id: ${version.versionId}.`);
+    seenVersions.add(version.versionId);
+    if (isPlainObject(version.snapshot) && version.snapshot.projectId !== undefined && version.snapshot.projectId !== routeProjectId) throw importError(`Version ${version.versionId} snapshot belongs to another project.`);
+    const error = validateImportedPaths(version, routeProjectId, `versions[${index}]`);
+    if (error) throw importError(error);
+    return { ...cloneJson(version), projectId: routeProjectId };
+  });
+  const seenJobs = new Set();
+  const cleanJobs = jobs.map((job, index) => {
+    if (!isPlainObject(job) || typeof job.jobId !== 'string' || !IMPORT_JOB_ID_PATTERN.test(job.jobId) || job.projectId !== routeProjectId) throw importError(`Invalid job at index ${index}.`);
+    if (seenJobs.has(job.jobId)) throw importError(`Duplicate job id: ${job.jobId}.`);
+    seenJobs.add(job.jobId);
+    const error = validateImportedPaths(job, routeProjectId, `jobs[${index}]`);
+    if (error) throw importError(error);
+    return cloneJson(job);
+  });
+  const cleanJobIds = new Set(cleanJobs.map((job) => job.jobId));
+  const seenAssets = new Set();
+  const cleanAssets = assets.map((asset, index) => {
+    if (!isPlainObject(asset) || typeof asset.assetId !== 'string' || !IMPORT_ASSET_ID_PATTERN.test(asset.assetId) || asset.projectId !== routeProjectId) throw importError(`Invalid asset at index ${index}.`);
+    if (seenAssets.has(asset.assetId)) throw importError(`Duplicate asset id: ${asset.assetId}.`);
+    seenAssets.add(asset.assetId);
+    if (typeof asset.url !== 'string' || !isSafeUploadReference(asset.url, routeProjectId)) throw importError(`Invalid asset path at index ${index}.`);
+    if (asset.archivedUrl !== undefined && (!isSafeUploadReference(asset.archivedUrl, routeProjectId))) throw importError(`Invalid asset archivedUrl at index ${index}.`);
+    if (asset.thumbnailUrl !== undefined && typeof asset.thumbnailUrl === 'string' && asset.thumbnailUrl.startsWith('/uploads/') && !isSafeUploadReference(asset.thumbnailUrl, routeProjectId)) throw importError(`Invalid asset thumbnailUrl at index ${index}.`);
+    if (asset.sourceUrl !== undefined && typeof asset.sourceUrl === 'string' && asset.sourceUrl.startsWith('/uploads/') && !isSafeUploadReference(asset.sourceUrl, routeProjectId)) throw importError(`Invalid asset sourceUrl at index ${index}.`);
+    if (asset.jobId && !cleanJobIds.has(asset.jobId)) throw importError(`Asset ${asset.assetId} references an unknown job.`);
+    const error = validateImportedPaths(asset, routeProjectId, `assets[${index}]`);
+    if (error) throw importError(error);
+    return cloneJson(asset);
+  });
+  let uploads = body.uploads;
+  if (uploads === undefined) uploads = [];
+  if (!Array.isArray(uploads)) throw importError('uploads must be an array.');
+  const seenUploads = new Set();
+  const cleanUploads = uploads.map((entry, index) => {
+    if (!isPlainObject(entry) || typeof entry.path !== 'string' || !isSafeUploadReference(entry.path, routeProjectId)) throw importError(`Invalid upload manifest entry at index ${index}.`);
+    if (seenUploads.has(entry.path)) throw importError(`Duplicate upload manifest path: ${entry.path}.`);
+    seenUploads.add(entry.path);
+    return cloneJson(entry);
+  });
+  return { project, versions: cleanVersions, jobs: cleanJobs, assets: cleanAssets, uploads: cleanUploads };
+};
+
+const handleProjectImportUnsafe = async (req, res) => {
+  const projectId = importProjectIdFromRequest(req);
+  if (!isValidProjectId(projectId)) { sendJson(res, 400, { error: 'Invalid project id.' }); return; }
+  let body;
+  try { body = JSON.parse(await readImportBody(req)); }
+  catch (error) {
+    if (error.code === 'IMPORT_TOO_LARGE') { sendJson(res, 413, { error: 'Import payload is too large.' }); return; }
+    sendJson(res, 400, { error: 'Invalid JSON request.' }); return;
+  }
+  let imported;
+  try { imported = validateImportEnvelope(body, projectId); }
+  catch (error) { sendJson(res, 400, { error: error.message }); return; }
+  const mode = body.mode;
+  const projects = readProjectStore();
+  if (Object.prototype.hasOwnProperty.call(projects, projectId) && mode !== 'replace') { sendJson(res, 409, { error: 'Project already exists. Import requires mode "replace".' }); return; }
+  const originalStates = new Map([
+    [projectStorePath, cloneStoreState(projectStorePath)],
+    [projectVersionsPath, cloneStoreState(projectVersionsPath)],
+    [generationJobsPath, cloneStoreState(generationJobsPath)],
+    [resultAssetsPath, cloneStoreState(resultAssetsPath)]
+  ]);
+  const snapshotErrors = [...originalStates.entries()].filter(([, snapshot]) => !snapshot.ok);
+  if (snapshotErrors.length) {
+    console.error('[project-import] could not snapshot stores:', snapshotErrors.map(([filePath, snapshot]) => filePath + ': ' + snapshot.error.message).join('; '));
+    sendJson(res, 500, { error: 'Project import could not be saved.' });
+    return;
+  }
+  try {
+    const nextProjects = { ...projects, [projectId]: imported.project };
+    const nextVersions = readProjectVersions();
+    nextVersions[projectId] = imported.versions;
+    const nextJobs = readGenerationJobs();
+    for (const key of Object.keys(nextJobs)) if (nextJobs[key]?.projectId === projectId) delete nextJobs[key];
+    imported.jobs.forEach((job) => { nextJobs[`${projectId}:${job.jobId}`] = job; });
+    const nextAssets = readResultAssets();
+    nextAssets[projectId] = Object.fromEntries(imported.assets.map((asset) => [asset.assetId, normalizeResultAsset(asset, projectId, asset.assetId)]).filter(([, asset]) => asset));
+    writeProjectStore(nextProjects);
+    writeProjectVersions(nextVersions);
+    writeGenerationJobs(nextJobs);
+    writeResultAssets(nextAssets);
+    projectImportRevisions.set(projectId, getProjectImportRevision(projectId) + 1);
+    const referenced = collectUploadReferences([imported.project, imported.versions, imported.jobs, imported.assets]);
+    const manifestPaths = new Set(imported.uploads.map((entry) => entry.path));
+    const warnings = [];
+    if (!imported.uploads.length && referenced.size) warnings.push({ code: 'UPLOAD_MANIFEST_MISSING', message: 'Upload files are referenced but no upload manifest was provided.' });
+    for (const uploadPath of referenced) {
+      if (!manifestPaths.has(uploadPath)) warnings.push({ code: 'UPLOAD_MANIFEST_MISSING', path: uploadPath, message: `Upload manifest is missing ${uploadPath}.` });
+      const actualPath = resolveUploadFilePath(uploadPath);
+      const actualExists = Boolean(actualPath && fs.existsSync(actualPath) && !fs.statSync(actualPath).isDirectory());
+      if (!actualExists) warnings.push({ code: 'UPLOAD_MISSING', path: uploadPath, message: `Referenced upload ${uploadPath} is not present on this server.` });
+    }
+    sendJson(res, 200, { schemaVersion: exportImportSchemaVersion, projectId, project: imported.project, versions: imported.versions, jobs: imported.jobs, assets: imported.assets, warnings });
+  } catch (error) {
+    const rollbackErrors = restoreStoreStates(originalStates);
+    rollbackErrors.forEach(({ filePath, error }) => console.error('[project-import] rollback failed for', filePath, error.message));
+    console.error('[project-import] failed:', error.message);
+    sendJson(res, 500, { error: 'Project import could not be saved.' });
+  }
+};
+const handleProjectImport = (req, res) => withProjectDataMutation(() => handleProjectImportUnsafe(req, res));
+
 const projectIdFromRequest = (req) => {
   const match = req.url.match(/^\/api\/projects\/([^/?]+)(?:\?.*)?$/);
   return match ? decodeURIComponent(match[1]) : '';
 };
 
-const handleProject = async (req, res) => {
+const handleProjectUnsafe = async (req, res) => {
   const projectId = projectIdFromRequest(req);
   if (!isValidProjectId(projectId)) {
     sendJson(res, 400, { error: 'Invalid project id.' });
@@ -480,11 +799,13 @@ const handleProject = async (req, res) => {
   sendJson(res, 405, { error: 'Method not allowed.' });
 };
 
+const handleProject = (req, res) => req.method === 'GET'
+  ? handleProjectUnsafe(req, res)
+  : withProjectDataMutation(() => handleProjectUnsafe(req, res));
+
 const projectVersionCollectionMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions(?:\?.*)?$/);
 const projectVersionDiffMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions\/([^/?]+)\/diff(?:\?.*)?$/);
 const projectVersionRestoreMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions\/([^/?]+)\/restore(?:\?.*)?$/);
-let projectVersionsMutationTail = Promise.resolve();
-
 const handleProjectVersionsUnsafe = async (req, res) => {
   const collectionMatch = projectVersionCollectionMatch(req);
   const diffMatch = projectVersionDiffMatch(req);
@@ -626,9 +947,7 @@ const handleProjectVersionsUnsafe = async (req, res) => {
 
 const handleProjectVersions = (req, res) => {
   if (req.method === 'GET') return handleProjectVersionsUnsafe(req, res);
-  const run = projectVersionsMutationTail.then(() => handleProjectVersionsUnsafe(req, res));
-  projectVersionsMutationTail = run.catch(() => {});
-  return run;
+  return withProjectDataMutation(() => handleProjectVersionsUnsafe(req, res));
 };
 
 const readBody = (req) => new Promise((resolve, reject) => {
@@ -1074,12 +1393,9 @@ const handleGenerationJobsUnsafe = async (req, res) => {
   sendJson(res, 405, { error: 'Method not allowed.' });
 };
 
-let generationJobsMutationTail = Promise.resolve();
 const handleGenerationJobs = (req, res) => {
   if (req.method === 'GET') return handleGenerationJobsUnsafe(req, res);
-  const run = generationJobsMutationTail.then(() => handleGenerationJobsUnsafe(req, res));
-  generationJobsMutationTail = run.catch(() => {});
-  return run;
+  return withProjectDataMutation(() => handleGenerationJobsUnsafe(req, res));
 };
 
 const readBinaryBody = (req, maxBytes = 8 * 1024 * 1024) => new Promise((resolve, reject) => {
@@ -1196,6 +1512,15 @@ const handleResultAssets = async (req, res) => {
   sendJson(res, 405, { error: 'Method not allowed.' });
 };
 
+const isRealPathWithin = (rootPath, targetPath) => {
+  try {
+    const realRoot = fs.realpathSync(rootPath);
+    const realTarget = fs.realpathSync(targetPath);
+    const relative = path.relative(realRoot, realTarget);
+    return Boolean(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+  } catch { return false; }
+};
+
 const handleAssetUpload = async (req, res) => {
   const projectId = assetPathFromRequest(req);
   if (!isValidProjectId(projectId)) { sendJson(res, 400, { error: 'Invalid project id.' }); return; }
@@ -1206,8 +1531,15 @@ const handleAssetUpload = async (req, res) => {
   try {
     const bytes = await readBinaryBody(req);
     if (!bytes.length) { sendJson(res, 400, { error: 'Empty image upload.' }); return; }
+    fs.mkdirSync(uploadsDir, { recursive: true });
     const projectDir = path.join(uploadsDir, projectId);
+    if (fs.existsSync(projectDir) && (!fs.statSync(projectDir).isDirectory() || !isRealPathWithin(uploadsDir, projectDir))) {
+      sendJson(res, 400, { error: 'Project upload directory is invalid.' }); return;
+    }
     fs.mkdirSync(projectDir, { recursive: true });
+    if (!isRealPathWithin(uploadsDir, projectDir)) {
+      sendJson(res, 400, { error: 'Project upload directory is invalid.' }); return;
+    }
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}${extension}`;
     const outputPath = path.join(projectDir, filename);
     fs.writeFileSync(outputPath, bytes);
@@ -1313,14 +1645,19 @@ const readProjectAgentState = (project) => {
   };
 };
 
-const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft = false, allocateDraftVersion = false, rejectCancelled = false } = {}) => {
+const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft = false, allocateDraftVersion = false, rejectCancelled = false, expectedProjectUpdatedAt, expectedImportRevision, expectedAgentRunId, expectedAgentStatus } = {}) => {
   const store = readProjectStore();
   const project = store[projectId];
   if (!project) return { ok: false, code: AGENT_ERROR_CODES.PROJECT_NOT_FOUND };
+  if (expectedImportRevision !== undefined && getProjectImportRevision(projectId) !== expectedImportRevision) return { ok: false, code: AGENT_ERROR_CODES.PERSIST_FAILED, conflict: true };
+  if (expectedProjectUpdatedAt !== undefined && project.updatedAt !== expectedProjectUpdatedAt) return { ok: false, code: AGENT_ERROR_CODES.PERSIST_FAILED, conflict: true };
   const agent = readProjectAgentState(project);
   const existingRun = agent.runs.find((item) => item.runId === run.runId);
   if (rejectCancelled && existingRun?.status === 'cancelled' && run.status !== 'cancelled') {
     return { ok: false, code: AGENT_ERROR_CODES.AGENT_CANCELLED, run: existingRun };
+  }
+  if (expectedAgentRunId && (!existingRun || (expectedAgentStatus && existingRun.status !== expectedAgentStatus))) {
+    return { ok: false, code: AGENT_ERROR_CODES.PERSIST_FAILED, conflict: true };
   }
   if (allocateDraftVersion && run.status === 'completed' && run.output?.draft) {
     run.version = agent.latestDraftVersion + 1;
@@ -1355,7 +1692,12 @@ const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft 
   }
 };
 
-const handleAgentRuns = async (req, res) => {
+const persistProjectAgentRunQueued = (projectId, run, options = {}) => withProjectDataMutation(() => persistProjectAgentRun(projectId, run, options));
+const persistProjectAgentRunForRequest = (mutationLease, projectId, run, options = {}) => mutationLease
+  ? persistProjectAgentRun(projectId, run, options)
+  : persistProjectAgentRunQueued(projectId, run, options);
+
+const handleAgentRunsUnsafe = async (req, res, { mutationLease = false } = {}) => {
   const collectionMatch = projectAgentCollectionMatch(req);
   const itemMatch = projectAgentItemMatch(req);
   const projectId = decodeURIComponent(collectionMatch?.[1] || itemMatch?.[1] || '');
@@ -1364,6 +1706,7 @@ const handleAgentRuns = async (req, res) => {
   const project = store[projectId];
   if (!project) { sendJson(res, 404, { error: 'Project not found.', errorCode: AGENT_ERROR_CODES.PROJECT_NOT_FOUND }); return; }
   const agent = readProjectAgentState(project);
+  const expectedProjectUpdatedAt = project.updatedAt;
   if (itemMatch) {
     const runId = decodeURIComponent(itemMatch[2]);
     const run = agent.runs.find((item) => item.runId === runId);
@@ -1403,7 +1746,7 @@ const handleAgentRuns = async (req, res) => {
         restoredFromRunId: run.runId,
         ...(allowIncompleteSemanticMinimum ? { legacyCompatibility: { allowIncompleteSemanticMinimum: true, sourceRunId: run.runId } } : {})
       };
-      const persisted = persistProjectAgentRun(projectId, restoredRun, { isNewRun: true });
+      const persisted = await persistProjectAgentRunForRequest(mutationLease, projectId, restoredRun, { isNewRun: true, expectedProjectUpdatedAt });
       if (!persisted.ok) { sendJson(res, 500, { error: 'Restored Agent run could not be saved.', errorCode: persisted.code }); return; }
       sendJson(res, 201, { projectId, sourceRunId: run.runId, run: restoredRun });
       return;
@@ -1425,7 +1768,7 @@ const handleAgentRuns = async (req, res) => {
       run.acceptedAt = timestamp;
       run.acceptedVersion = run.version;
       run.updatedAt = timestamp;
-      const persisted = persistProjectAgentRun(projectId, run, { acceptDraft: true });
+      const persisted = await persistProjectAgentRunForRequest(mutationLease, projectId, run, { acceptDraft: true, expectedProjectUpdatedAt });
       if (!persisted.ok) { sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: persisted.code }); return; }
       sendJson(res, 200, { projectId, run });
       return;
@@ -1446,7 +1789,7 @@ const handleAgentRuns = async (req, res) => {
       run.errorCode = AGENT_ERROR_CODES.AGENT_CANCELLED;
       run.errorMessage = 'Agent run cancelled by user.';
       run.updatedAt = timestamp;
-      const persisted = persistProjectAgentRun(projectId, run);
+      const persisted = await persistProjectAgentRunForRequest(mutationLease, projectId, run, { expectedProjectUpdatedAt });
       if (!persisted.ok) { sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: persisted.code }); return; }
       sendJson(res, 200, { projectId, run });
       return;
@@ -1486,7 +1829,7 @@ const handleAgentRuns = async (req, res) => {
       run.acceptedAt = null;
       run.acceptedVersion = null;
       run.updatedAt = timestamp;
-      const persisted = persistProjectAgentRun(projectId, run);
+      const persisted = await persistProjectAgentRunForRequest(mutationLease, projectId, run, { expectedProjectUpdatedAt });
       if (!persisted.ok) { sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: persisted.code }); return; }
       sendJson(res, 200, { projectId, run });
       return;
@@ -1519,7 +1862,7 @@ const handleAgentRuns = async (req, res) => {
     createdAt,
     completedAt: requestedInput.ok ? null : createdAt
   });
-  const initialPersisted = persistProjectAgentRun(projectId, queuedRun, { isNewRun: true });
+  const initialPersisted = await persistProjectAgentRunQueued(projectId, queuedRun, { isNewRun: true });
   if (!initialPersisted.ok) {
     sendJson(res, initialPersisted.code === AGENT_ERROR_CODES.PROJECT_NOT_FOUND ? 404 : 500, { error: 'Agent run could not be saved.', errorCode: initialPersisted.code });
     return;
@@ -1531,17 +1874,19 @@ const handleAgentRuns = async (req, res) => {
 
   const runningTimestamp = nowIso();
   const runningRun = { ...queuedRun, status: 'running', startedAt: runningTimestamp, updatedAt: runningTimestamp };
-  const runningPersisted = persistProjectAgentRun(projectId, runningRun);
+  const runningPersisted = await persistProjectAgentRunQueued(projectId, runningRun);
   if (!runningPersisted.ok) {
     sendJson(res, 500, { error: 'Agent run could not be saved.', errorCode: runningPersisted.code });
     return;
   }
 
+  const expectedImportRevision = getProjectImportRevision(projectId);
   const result = await runAgentRequest({ ...requestBody, projectId }, { projectId, runId });
   const latestStore = readProjectStore();
   const latestProject = latestStore[projectId];
   const latestAgent = readProjectAgentState(latestProject);
   const latestRun = latestAgent.runs.find((item) => item.runId === runId);
+  const latestProjectUpdatedAt = latestProject?.updatedAt;
   if (latestRun?.status === 'cancelled') {
     sendJson(res, 409, { error: 'Agent run was cancelled.', errorCode: AGENT_ERROR_CODES.AGENT_CANCELLED, run: latestRun });
     return;
@@ -1557,7 +1902,7 @@ const handleAgentRuns = async (req, res) => {
   };
   const hasDraft = Boolean(result.ok && hasDraftTask && finalRun.output?.draft);
   finalRun.version = 0;
-  const persisted = persistProjectAgentRun(projectId, finalRun, { allocateDraftVersion: hasDraft, rejectCancelled: true });
+  const persisted = await persistProjectAgentRunQueued(projectId, finalRun, { allocateDraftVersion: hasDraft, rejectCancelled: true, expectedImportRevision, expectedAgentRunId: runId, expectedAgentStatus: 'running' });
   if (!persisted.ok && persisted.code === AGENT_ERROR_CODES.AGENT_CANCELLED) {
     sendJson(res, 409, { error: 'Agent run was cancelled.', errorCode: AGENT_ERROR_CODES.AGENT_CANCELLED, run: persisted.run });
     return;
@@ -1573,14 +1918,19 @@ const handleAgentRuns = async (req, res) => {
   sendJson(res, 201, { projectId, run: persisted.run || finalRun });
 };
 
+const handleAgentRuns = (req, res) => {
+  const itemMatch = projectAgentItemMatch(req);
+  const isMutation = Boolean(itemMatch && req.method !== 'GET');
+  if (!isMutation) return handleAgentRunsUnsafe(req, res);
+  return withProjectDataMutation(() => handleAgentRunsUnsafe(req, res, { mutationLease: true }));
+};
+
 const serveStatic = (req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(req.url.split('?')[0]); } catch { res.writeHead(404); res.end('Not found'); return; }
   if (urlPath.startsWith('/uploads/')) {
-    const relativeUploadPath = path.relative(uploadsDir, path.resolve(uploadsDir, `.${urlPath.slice('/uploads'.length)}`));
-    if (relativeUploadPath.startsWith('..') || path.isAbsolute(relativeUploadPath)) { res.writeHead(404); res.end('Not found'); return; }
-    const uploadPath = path.join(uploadsDir, relativeUploadPath);
-    if (!fs.existsSync(uploadPath) || fs.statSync(uploadPath).isDirectory()) { res.writeHead(404); res.end('Not found'); return; }
+    const uploadPath = resolveUploadFilePath(urlPath);
+    if (!uploadPath || !fs.existsSync(uploadPath) || fs.statSync(uploadPath).isDirectory()) { res.writeHead(404); res.end('Not found'); return; }
     const ext = path.extname(uploadPath).toLowerCase();
     res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' });
     fs.createReadStream(uploadPath).pipe(res);
@@ -1611,17 +1961,17 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS' }); res.end(); return; }
   if (req.method === 'GET' && req.url === '/api/health') { sendJson(res, 200, { ok: true, provider: 'deepseek', configured: Boolean(deepseekApiKey), imageProvider: 'multi-platform-extension' }); return; }
   if (req.method === 'POST' && req.url === '/api/agent') { await handleAgent(req, res); return; }
+  if (req.method === 'GET' && /^\/api\/projects\/[^/?]+\/export(?:\?.*)?$/.test(req.url)) { await handleProjectExport(req, res); return; }
+  if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/import(?:\?.*)?$/.test(req.url)) { await handleProjectImport(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore|cancel))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }
   if (/^\/(api\/projects\/[^/?]+\/generation-jobs)/.test(req.url)) { await handleGenerationJobs(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/(?:result-assets|assets)(?:\/|\?|$)/.test(req.url) && !(req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets(?:\?|$)/.test(req.url))) {
     if (req.method === 'GET') { await handleResultAssets(req, res); return; }
-    const run = generationJobsMutationTail.then(() => handleResultAssets(req, res));
-    generationJobsMutationTail = run.catch(() => {});
-    await run;
+    await withProjectDataMutation(() => handleResultAssets(req, res));
     return;
   }
   if (/^\/api\/projects\/[^/?]+\/versions(?:\/[^/?]+\/(?:diff|restore))?(?:\?.*)?$/.test(req.url)) { await handleProjectVersions(req, res); return; }
-  if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await handleAssetUpload(req, res); return; }
+  if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await withProjectDataMutation(() => handleAssetUpload(req, res)); return; }
   if ((req.method === 'GET' || req.method === 'PUT') && /^\/api\/projects\//.test(req.url)) { await handleProject(req, res); return; }
   if (req.method === 'GET') { serveStatic(req, res); return; }
   sendJson(res, 405, { error: 'Method not allowed.' });
