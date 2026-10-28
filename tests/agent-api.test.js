@@ -227,6 +227,38 @@ test('project Agent runs persist lifecycle states and cancellation wins over lat
   assert.equal(failedPayload.run.errorCode, 'MODEL_INVALID_JSON');
 });
 
+test('delayed Agent completion cannot overwrite an intervening project import', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const pendingResponse = fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validBody('__mock_delay__'))
+  });
+  await wait(40);
+  const importResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      mode: 'replace',
+      project: [{ projectId: 'demo-pearl-necklace', projectName: 'imported', product: { name: 'imported' }, descriptionA: 'Imported A', promptB: 'Imported B', importedMarker: true }],
+      versions: [], jobs: [], assets: [], uploads: []
+    })
+  });
+  assert.equal(importResponse.status, 200);
+  const lateResponse = await pendingResponse;
+  assert.equal(lateResponse.status, 500);
+  const importedProject = (await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace`)).json()).project;
+  assert.equal(importedProject.importedMarker, true);
+  assert.equal(importedProject.agent, undefined);
+});
+
 test('concurrent completed description runs receive distinct draft versions', async (t) => {
   const projectsPath = path.join(root, 'data', 'projects.json');
   const originalProjects = fs.readFileSync(projectsPath, 'utf8');
@@ -354,6 +386,28 @@ test('project Agent run detail supports user edits and acceptance', async (t) =>
   const originalRun = afterRestore.runs.find((item) => item.runId === runId);
   assert.equal(originalRun.accepted, true);
   assert.equal(originalRun.output.draft.rawText, '用户确认后的 A 版');
+});
+
+test('concurrent Agent mutations use compare-and-swap and preserve one update', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const created = await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validBody('CAS race'))
+  })).json();
+  const runId = created.run.runId;
+  const requests = ['first concurrent edit', 'second concurrent edit'].map((rawText) => fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs/${encodeURIComponent(runId)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft: { rawText, padding: 'x'.repeat(200000) } })
+  }));
+  const responses = await Promise.all(requests);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 200]);
+  const listed = await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`)).json();
+  assert.equal(listed.runs[0].version, 3);
+  assert.ok(['first concurrent edit', 'second concurrent edit'].includes(listed.runs[0].output.draft.rawText));
 });
 
 test('follow-up runs do not advance A versions and accepting an older run keeps latestRunId stable', async (t) => {
