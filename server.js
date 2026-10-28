@@ -2,6 +2,7 @@ const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const {
   ERROR_CODES: AGENT_ERROR_CODES,
   applyUserDraftEdits,
@@ -32,6 +33,7 @@ const deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.c
 const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 const dataDir = path.resolve(process.env.ZAOTU_DATA_DIR || path.join(root, 'data'));
 const projectStorePath = path.join(dataDir, 'projects.json');
+const projectVersionsPath = path.join(dataDir, 'project-versions.json');
 const generationJobsPath = path.join(dataDir, 'generation-jobs.json');
 const uploadsDir = path.join(dataDir, 'uploads');
 const assetsDir = path.join(root, 'assets');
@@ -219,6 +221,89 @@ const writeProjectStore = (store) => {
   fs.renameSync(temporaryPath, projectStorePath);
 };
 
+const cloneJson = (value) => JSON.parse(JSON.stringify(value));
+const readFileState = (filePath) => ({
+  exists: fs.existsSync(filePath),
+  bytes: fs.existsSync(filePath) ? fs.readFileSync(filePath) : null
+});
+const restoreFileState = (filePath, state) => {
+  const temporaryPath = `${filePath}.rollback-${process.pid}-${Date.now().toString(36)}`;
+  try {
+    if (state.exists) {
+      fs.writeFileSync(temporaryPath, state.bytes);
+      fs.renameSync(temporaryPath, filePath);
+    } else {
+      if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) fs.unlinkSync(filePath);
+      if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    }
+  } catch (error) {
+    try { if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath); } catch {}
+    throw error;
+  }
+};
+const readProjectVersions = () => {
+  try {
+    if (!fs.existsSync(projectVersionsPath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(projectVersionsPath, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([projectId, versions]) => [
+      projectId,
+      Array.isArray(versions) ? versions.filter((version) => version && typeof version === 'object' && !Array.isArray(version)) : []
+    ]));
+  } catch (error) {
+    console.error('[project-versions] failed to read store:', error.message);
+    return {};
+  }
+};
+
+const writeProjectVersions = (store) => {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const temporaryPath = `${projectVersionsPath}.tmp`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
+  fs.renameSync(temporaryPath, projectVersionsPath);
+};
+
+const createProjectVersionId = () => `version-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+const hasMeaningfulText = (value) => typeof value === 'string' && value.trim().length > 0;
+const hasMeaningfulObject = (value) => isPlainObject(value) && Object.keys(value).length > 0;
+const normalizeVersionSnapshot = (snapshot, projectId, jobs = {}) => {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+  const normalized = cloneJson(snapshot);
+  const product = normalized.product;
+  const hasProduct = isPlainObject(product) && Object.values(product).some((value) => hasMeaningfulText(value));
+  const bExecution = isPlainObject(normalized.promptBExecution) ? normalized.promptBExecution : {};
+  const hasA = hasMeaningfulText(normalized.descriptionA)
+    || hasMeaningfulObject(normalized.descriptionAStructured)
+    || hasMeaningfulObject(normalized.descriptionADraft)
+    || hasMeaningfulText(normalized.a);
+  const hasB = hasMeaningfulText(normalized.promptB)
+    || hasMeaningfulText(bExecution.positive_prompt)
+    || hasMeaningfulText(bExecution.positivePrompt)
+    || hasMeaningfulText(normalized.b);
+  const hasProjectIdentity = hasMeaningfulText(normalized.projectId)
+    || hasMeaningfulText(normalized.projectName)
+    || hasMeaningfulText(normalized.id)
+    || hasProduct;
+  if (!hasProjectIdentity || !hasProduct || !hasA || !hasB) return null;
+  normalized.projectId = projectId;
+  normalized.product = isPlainObject(normalized.product) ? normalized.product : {};
+  normalized.platformParams = isPlainObject(normalized.platformParams) ? normalized.platformParams : {};
+  normalized.platformOverrides = isPlainObject(normalized.platformOverrides) ? normalized.platformOverrides : {};
+  const taskRefs = Array.isArray(normalized.taskRefs)
+    ? normalized.taskRefs
+    : Object.values(jobs)
+      .filter((job) => job && job.projectId === projectId)
+      .map((job) => ({ jobId: job.jobId, createdAt: job.createdAt, status: job.status }));
+  const resultRefs = Array.isArray(normalized.resultRefs)
+    ? normalized.resultRefs
+    : (Array.isArray(normalized.generatedResults) ? normalized.generatedResults : []);
+  normalized.taskRefs = cloneJson(taskRefs);
+  normalized.resultRefs = cloneJson(resultRefs);
+  return normalized;
+};
+const isValidVersionId = (value) => typeof value === 'string' && /^version-[A-Za-z0-9-]{8,120}$/.test(value);
+const decodeRoutePart = (value) => { try { return decodeURIComponent(value); } catch { return null; } };
+
 const readGenerationJobs = () => {
   try {
     if (!fs.existsSync(generationJobsPath)) return {};
@@ -290,6 +375,122 @@ const handleProject = async (req, res) => {
     return;
   }
   sendJson(res, 405, { error: 'Method not allowed.' });
+};
+
+const projectVersionCollectionMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions(?:\?.*)?$/);
+const projectVersionRestoreMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions\/([^/?]+)\/restore(?:\?.*)?$/);
+let projectVersionsMutationTail = Promise.resolve();
+
+const handleProjectVersionsUnsafe = async (req, res) => {
+  const collectionMatch = projectVersionCollectionMatch(req);
+  const restoreMatch = projectVersionRestoreMatch(req);
+  const encodedProjectId = collectionMatch?.[1] || restoreMatch?.[1] || '';
+  const projectId = decodeRoutePart(encodedProjectId);
+  if (!projectId || !isValidProjectId(projectId)) {
+    sendJson(res, 400, { error: 'Invalid project id.' });
+    return;
+  }
+  const projects = readProjectStore();
+  if (!projects[projectId]) {
+    sendJson(res, 404, { error: 'Project not found.' });
+    return;
+  }
+
+  const versionsStore = readProjectVersions();
+  const projectVersions = Array.isArray(versionsStore[projectId]) ? versionsStore[projectId] : [];
+  if (collectionMatch && req.method === 'GET') {
+    sendJson(res, 200, { projectId, versions: projectVersions.map((version) => cloneJson(version)) });
+    return;
+  }
+
+  if (collectionMatch && req.method === 'POST') {
+    const body = await readJsonBody(req, res);
+    if (!body) return;
+    let snapshot;
+    if (hasOwn(body, 'snapshot')) snapshot = body.snapshot;
+    else if (hasOwn(body, 'project')) snapshot = body.project;
+    else snapshot = body;
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      sendJson(res, 400, { error: 'Version snapshot must be an object.' });
+      return;
+    }
+    const normalizedSnapshot = normalizeVersionSnapshot(snapshot, projectId, readGenerationJobs());
+    if (!normalizedSnapshot) {
+      sendJson(res, 400, { error: 'Version snapshot is malformed.' });
+      return;
+    }
+    const version = {
+      versionId: createProjectVersionId(),
+      projectId,
+      createdAt: new Date().toISOString(),
+      restoredFromVersionId: null,
+      snapshot: normalizedSnapshot
+    };
+    versionsStore[projectId] = [version, ...projectVersions];
+    try {
+      writeProjectVersions(versionsStore);
+    } catch (error) {
+      console.error('[project-versions] failed to write store:', error.message);
+      sendJson(res, 500, { error: 'Project version could not be saved.' });
+      return;
+    }
+    sendJson(res, 201, { projectId, version: cloneJson(version), versions: versionsStore[projectId].map((item) => cloneJson(item)) });
+    return;
+  }
+
+  if (restoreMatch && req.method === 'POST') {
+    const versionId = decodeRoutePart(restoreMatch[2]);
+    if (!versionId || !isValidVersionId(versionId)) {
+      sendJson(res, 400, { error: 'Invalid version id.' });
+      return;
+    }
+    const sourceVersion = projectVersions.find((version) => version.versionId === versionId);
+    if (!sourceVersion || !sourceVersion.snapshot || typeof sourceVersion.snapshot !== 'object' || Array.isArray(sourceVersion.snapshot)) {
+      sendJson(res, 404, { error: 'Version not found.' });
+      return;
+    }
+    const restoredProject = cloneJson(sourceVersion.snapshot);
+    restoredProject.projectId = projectId;
+    restoredProject.updatedAt = new Date().toISOString();
+    const existingProject = projects[projectId] && typeof projects[projectId] === 'object' ? projects[projectId] : {};
+    if (!hasOwn(restoredProject, 'agent') && existingProject.agent) restoredProject.agent = cloneJson(existingProject.agent);
+    const restoredVersion = {
+      versionId: createProjectVersionId(),
+      projectId,
+      createdAt: new Date().toISOString(),
+      restoredFromVersionId: versionId,
+      snapshot: cloneJson(restoredProject)
+    };
+    projects[projectId] = restoredProject;
+    versionsStore[projectId] = [restoredVersion, ...projectVersions];
+    const originalProjectFile = readFileState(projectStorePath);
+    const originalVersionsFile = readFileState(projectVersionsPath);
+    try {
+      writeProjectStore(projects);
+      writeProjectVersions(versionsStore);
+    } catch (error) {
+      try {
+        restoreFileState(projectStorePath, originalProjectFile);
+        restoreFileState(projectVersionsPath, originalVersionsFile);
+      } catch (rollbackError) {
+        console.error('[project-versions] rollback failed:', rollbackError.message);
+      }
+      console.error('[project-versions] failed to restore version:', error.message);
+      sendJson(res, 500, { error: 'Project version could not be restored.' });
+      return;
+    }
+    sendJson(res, 201, { projectId, sourceVersionId: versionId, version: cloneJson(restoredVersion), project: cloneJson(restoredProject) });
+    return;
+  }
+
+  sendJson(res, 405, { error: 'Method not allowed.' });
+};
+
+const handleProjectVersions = (req, res) => {
+  if (req.method === 'GET') return handleProjectVersionsUnsafe(req, res);
+  const run = projectVersionsMutationTail.then(() => handleProjectVersionsUnsafe(req, res));
+  projectVersionsMutationTail = run.catch(() => {});
+  return run;
 };
 
 const readBody = (req) => new Promise((resolve, reject) => {
@@ -1146,6 +1347,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/agent') { await handleAgent(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore|cancel))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }
   if (/^\/(api\/projects\/[^/?]+\/generation-jobs)/.test(req.url)) { await handleGenerationJobs(req, res); return; }
+  if (/^\/api\/projects\/[^/?]+\/versions(?:\/[^/?]+\/restore)?(?:\?.*)?$/.test(req.url)) { await handleProjectVersions(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await handleAssetUpload(req, res); return; }
   if ((req.method === 'GET' || req.method === 'PUT') && /^\/api\/projects\//.test(req.url)) { await handleProject(req, res); return; }
   if (req.method === 'GET') { serveStatic(req, res); return; }

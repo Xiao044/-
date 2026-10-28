@@ -298,6 +298,14 @@
       const persistedResults = () => generatedResults
         .filter((result) => !/^data:image\//i.test(String(result?.url || '')) && !/^blob:/i.test(String(result?.url || '')))
         .map(({ imageDataUrl, imageMimeType, ...result }) => result);
+      const mergeVersionRecords = (serverRecords, localRecords = []) => {
+        const server = Array.isArray(serverRecords) ? serverRecords : [];
+        const local = Array.isArray(localRecords) ? localRecords : [];
+        if (!server.length) return [...local];
+        const serverIds = new Set(server.map((record) => record?.versionId).filter(Boolean));
+        const localOnly = local.filter((record) => !record?.versionId || !serverIds.has(record.versionId));
+        return [...server, ...localOnly];
+      };
 
       const persistState = () => {
         try {
@@ -345,7 +353,7 @@
       const serializeProject = () => {
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
-          selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
+          projectId, selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
           descriptionA, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
           promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion },
@@ -827,34 +835,58 @@
         closeModal();
         showToast('商品资料已更新');
       };
-      const saveVersion = () => {
-        versions.unshift({
-          timestamp: new Date().toLocaleString('zh-CN', { hour12: false }),
-          selectedScene: sceneOptions.find((option) => option.classList.contains('selected'))?.textContent.trim() || '',
-          progress,
-          descriptionA,
-          descriptionAStructured,
-          descriptionADraft,
-          descriptionAFieldEdits,
-          aReferenceImageUrl,
-          promptB,
-          negativePrompt,
-          aspectRatio,
-          platformParams,
-          platformOverrides,
-          promptBSource,
-          promptBVersion,
-          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion },
-          resultGenerated,
-          resultSelected,
-          product: { ...productState }
-        });
-        versions = versions.slice(0, 8);
-        persistState();
+      const versionSnapshot = () => {
+        const snapshot = serializeProject();
+        snapshot.versions = [];
+        snapshot.taskRefs = generationJobId ? [{ jobId: generationJobId }] : [];
+        snapshot.resultRefs = persistedResults();
+        return snapshot;
       };
-      const openVersionHistory = () => {
-        const items = versions.length ? versions.map((version, index) => `<li><div><strong>${version.timestamp}</strong><span>${version.product?.name || productState.name} · ${version.selectedScene || '未选择场景'}</span></div><button class="text-button" type="button" data-version-index="${index}">恢复</button></li>`).join('') : '<li class="empty-version">保存项目后，这里会出现可恢复的版本。</li>';
-        openModal('版本记录', `<p class="modal-note">版本会随当前项目状态保存；服务端不可用时仍保留本地草稿。</p><ul class="version-list">${items}</ul>`);
+      const saveVersion = async () => {
+        const snapshot = versionSnapshot();
+        try {
+          const response = await fetch(`${projectApiUrl}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ snapshot }) });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '版本保存失败');
+          versions = mergeVersionRecords(Array.isArray(payload.versions) ? payload.versions : [payload.version].filter(Boolean), versions);
+        } catch (error) {
+          versions.unshift({ versionId: `local-${Date.now()}`, createdAt: new Date().toISOString(), snapshot });
+          versions = versions.slice(0, 8);
+        }
+        persistState();
+        return versions[0];
+      };
+      const renderVersionHistory = () => {
+        const items = versions.length ? versions.map((record, index) => {
+          const version = record.snapshot || record;
+          const createdAt = record.createdAt || record.timestamp || '';
+          const label = createdAt ? new Date(createdAt).toLocaleString('zh-CN', { hour12: false }) : '本地草稿';
+          return `<li><div><strong>${label}</strong><span>${version.product?.name || productState.name} · ${version.selectedScene || '未选择场景'}</span></div><button class="text-button" type="button" data-version-index="${index}"${record.versionId ? ` data-version-id="${record.versionId}"` : ''}>恢复</button></li>`;
+        }).join('') : '<li class="empty-version">保存项目后，这里会出现可恢复的版本。</li>';
+        openModal('版本记录', `<p class="modal-note">版本由服务端保存；服务端不可用时仍保留本地草稿。</p><ul class="version-list">${items}</ul>`);
+      };
+      const openVersionHistory = async () => {
+        try {
+          const response = await fetch(`${projectApiUrl}/versions`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (response.ok && Array.isArray(payload.versions)) versions = mergeVersionRecords(payload.versions, versions);
+        } catch (error) { /* local versions remain available offline */ }
+        renderVersionHistory();
+      };
+      const restoreVersion = async (record) => {
+        if (!record) return;
+        if (record.versionId && !record.versionId.startsWith('local-')) {
+          const response = await fetch(`${projectApiUrl}/versions/${encodeURIComponent(record.versionId)}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '版本恢复失败');
+          const restoredProject = payload.project && typeof payload.project === 'object' ? payload.project : record.snapshot;
+          if (!restoredProject || typeof restoredProject !== 'object') throw new Error('版本恢复未返回项目快照');
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, projectId: restoredProject.projectId || payload.projectId || projectId }));
+        } else {
+          const localSnapshot = { ...(record.snapshot || record), projectId };
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
+        }
+        window.location.reload();
       };
       const openNewProject = () => {
         openModal('新建项目', '<p class="modal-note">新项目会从空白的商品资料和第一步场景开始。</p><label class="modal-field">项目名称<input id="new-project-name" placeholder="例如：夏日新品系列"></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="create-project">创建项目</button></div>');
@@ -2233,10 +2265,7 @@
         const versionIndex = event.target.closest('[data-version-index]')?.dataset.versionIndex;
         if (versionIndex !== undefined) {
           const version = versions[Number(versionIndex)];
-          if (version) {
-            window.localStorage.setItem(storageKey, JSON.stringify({ ...version, generated: version.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
-            window.location.reload();
-          }
+          if (version) restoreVersion(version).catch((error) => showToast(error.message || '版本恢复失败'));
         }
       });
       modal.addEventListener('input', (event) => {
