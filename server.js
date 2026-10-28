@@ -35,6 +35,7 @@ const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 const dataDir = path.resolve(process.env.ZAOTU_DATA_DIR || path.join(root, 'data'));
 const projectStorePath = path.join(dataDir, 'projects.json');
 const projectVersionsPath = path.join(dataDir, 'project-versions.json');
+const promptTemplatesPath = path.join(dataDir, 'prompt-templates.json');
 const generationJobsPath = path.join(dataDir, 'generation-jobs.json');
 const resultAssetsPath = path.join(dataDir, 'result-assets.json');
 const uploadsDir = path.join(dataDir, 'uploads');
@@ -299,6 +300,124 @@ const writeProjectVersions = (store) => {
 };
 
 const createProjectVersionId = () => `version-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+
+const TEMPLATE_KINDS = new Set(['category', 'scene', 'composition', 'negative']);
+const TEMPLATE_ID_PATTERN = /^template-[A-Za-z0-9-]{8,140}$/;
+const TEMPLATE_MUTABLE_FIELDS = new Set(['projectId', 'kind', 'name', 'description', 'content', 'fields', 'enabled', 'source', 'sourceVersionId']);
+const TEMPLATE_MAX_CONTENT_KEYS = 60;
+const TEMPLATE_MAX_CONTENT_DEPTH = 5;
+const TEMPLATE_MAX_CONTENT_STRING = 12000;
+const TEMPLATE_MAX_NAME = 120;
+const TEMPLATE_MAX_DESCRIPTION = 1000;
+const TEMPLATE_MAX_SOURCE = 80;
+const TEMPLATE_MAX_SOURCE_VERSION_ID = 160;
+const validateTemplateContent = (value, fieldName) => {
+  if (typeof value === 'string') {
+    if (value.length > TEMPLATE_MAX_CONTENT_STRING) return { ok: false, message: `${fieldName} must be at most ${TEMPLATE_MAX_CONTENT_STRING} characters.` };
+    return { ok: true, value };
+  }
+  if (!isPlainObject(value)) return { ok: false, message: `${fieldName} must be a string or JSON object.` };
+  const visit = (item, depth, pathName) => {
+    if (depth > TEMPLATE_MAX_CONTENT_DEPTH) return `${fieldName} is nested too deeply.`;
+    if (typeof item === 'string') return item.length <= TEMPLATE_MAX_CONTENT_STRING ? null : `${pathName} is too long.`;
+    if (item === null || typeof item === 'number' || typeof item === 'boolean') return null;
+    if (Array.isArray(item)) {
+      if (item.length > TEMPLATE_MAX_CONTENT_KEYS) return `${pathName} has too many entries.`;
+      for (let index = 0; index < item.length; index += 1) {
+        const error = visit(item[index], depth + 1, `${pathName}[${index}]`);
+        if (error) return error;
+      }
+      return null;
+    }
+    if (!isPlainObject(item)) return `${pathName} contains an unsupported value.`;
+    const entries = Object.entries(item);
+    if (entries.length > TEMPLATE_MAX_CONTENT_KEYS) return `${pathName} has too many fields.`;
+    for (const [key, child] of entries) {
+      if (!key.trim() || key.length > 80 || isReservedPlatformParamKey(key)) return `${pathName} contains an invalid field name.`;
+      const error = visit(child, depth + 1, `${pathName}.${key}`);
+      if (error) return error;
+    }
+    return null;
+  };
+  const error = visit(value, 0, fieldName);
+  return error ? { ok: false, message: error } : { ok: true, value: cloneJson(value) };
+};
+const validateTemplatePayload = (payload, { projectId, partial = false, imported = false } = {}) => {
+  if (!isPlainObject(payload)) return { ok: false, message: 'Template must be an object.' };
+  const allowed = imported
+    ? new Set(['templateId', 'projectId', 'kind', 'name', 'description', 'content', 'fields', 'enabled', 'version', 'source', 'sourceVersionId', 'createdAt', 'updatedAt'])
+    : TEMPLATE_MUTABLE_FIELDS;
+  for (const key of Object.keys(payload)) if (!allowed.has(key)) return { ok: false, message: `Template field "${key}" is not allowed.` };
+  if (payload.projectId !== undefined && payload.projectId !== projectId) return { ok: false, message: 'Template ownership does not match the route.' };
+  if (imported && payload.projectId !== projectId) return { ok: false, message: 'Template ownership does not match the route.' };
+  if (!partial || payload.kind !== undefined) {
+    if (typeof payload.kind !== 'string' || !TEMPLATE_KINDS.has(payload.kind)) return { ok: false, message: 'Template kind must be one of category, scene, composition, or negative.' };
+  }
+  if (!partial || payload.name !== undefined) {
+    if (typeof payload.name !== 'string' || !payload.name.trim() || payload.name.trim().length > TEMPLATE_MAX_NAME) return { ok: false, message: `Template name must be a non-empty string of at most ${TEMPLATE_MAX_NAME} characters.` };
+  }
+  if (payload.description !== undefined && (typeof payload.description !== 'string' || payload.description.length > TEMPLATE_MAX_DESCRIPTION)) return { ok: false, message: `Template description must be at most ${TEMPLATE_MAX_DESCRIPTION} characters.` };
+  for (const fieldName of ['content', 'fields']) {
+    if (payload[fieldName] !== undefined) {
+      const result = validateTemplateContent(payload[fieldName], `Template ${fieldName}`);
+      if (!result.ok) return result;
+    }
+  }
+  if (payload.enabled !== undefined && typeof payload.enabled !== 'boolean') return { ok: false, message: 'Template enabled must be a boolean.' };
+  if (payload.source !== undefined && (typeof payload.source !== 'string' || payload.source.length > TEMPLATE_MAX_SOURCE)) return { ok: false, message: `Template source must be at most ${TEMPLATE_MAX_SOURCE} characters.` };
+  if (payload.sourceVersionId !== undefined && (typeof payload.sourceVersionId !== 'string' || payload.sourceVersionId.length > TEMPLATE_MAX_SOURCE_VERSION_ID)) return { ok: false, message: `Template sourceVersionId must be at most ${TEMPLATE_MAX_SOURCE_VERSION_ID} characters.` };
+  if (imported) {
+    if (typeof payload.templateId !== 'string' || !TEMPLATE_ID_PATTERN.test(payload.templateId)) return { ok: false, message: 'Invalid template id.' };
+    if (payload.version !== undefined && (!Number.isInteger(payload.version) || payload.version < 1 || payload.version > 999999)) return { ok: false, message: 'Template version must be a positive integer.' };
+    for (const fieldName of ['createdAt', 'updatedAt']) if (payload[fieldName] !== undefined && (typeof payload[fieldName] !== 'string' || payload[fieldName].length > 80)) return { ok: false, message: `Template ${fieldName} must be a string.` };
+  }
+  return { ok: true };
+};
+const normalizePromptTemplate = (template, projectId, templateId = '') => {
+  if (!isPlainObject(template)) return null;
+  const candidate = { ...template, projectId, templateId: template.templateId || templateId };
+  const validation = validateTemplatePayload(candidate, { projectId, imported: true });
+  if (!validation.ok) return null;
+  const now = new Date().toISOString();
+  return {
+    templateId: candidate.templateId,
+    projectId,
+    kind: candidate.kind,
+    name: candidate.name.trim(),
+    ...(candidate.description !== undefined ? { description: candidate.description } : {}),
+    ...(candidate.content !== undefined ? { content: cloneJson(candidate.content) } : {}),
+    ...(candidate.fields !== undefined ? { fields: cloneJson(candidate.fields) } : {}),
+    enabled: candidate.enabled !== false,
+    version: Number.isInteger(candidate.version) && candidate.version > 0 ? candidate.version : 1,
+    source: candidate.source || 'manual',
+    ...(candidate.sourceVersionId ? { sourceVersionId: candidate.sourceVersionId } : {}),
+    createdAt: candidate.createdAt || now,
+    updatedAt: candidate.updatedAt || now
+  };
+};
+const readPromptTemplates = () => {
+  try {
+    if (!fs.existsSync(promptTemplatesPath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(promptTemplatesPath, 'utf8'));
+    if (!isPlainObject(parsed)) return {};
+    const normalized = {};
+    for (const [projectId, templates] of Object.entries(parsed)) {
+      if (!isValidProjectId(projectId) || !Array.isArray(templates)) continue;
+      normalized[projectId] = templates.map((template) => normalizePromptTemplate(template, projectId)).filter(Boolean);
+    }
+    return normalized;
+  } catch (error) {
+    console.error('[prompt-templates] failed to read store:', error.message);
+    return {};
+  }
+};
+const writePromptTemplates = (store) => {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const temporaryPath = `${promptTemplatesPath}.tmp`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
+  fs.renameSync(temporaryPath, promptTemplatesPath);
+};
+const createPromptTemplateId = () => `template-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 const hasMeaningfulText = (value) => typeof value === 'string' && value.trim().length > 0;
 const hasMeaningfulObject = (value) => isPlainObject(value) && Object.keys(value).length > 0;
 const normalizeVersionSnapshot = (snapshot, projectId, jobs = {}) => {
@@ -569,6 +688,9 @@ const handleProjectExport = async (req, res) => {
   const project = projects[projectId];
   if (!project || !isPlainObject(project)) { sendJson(res, 404, { error: 'Project not found.' }); return; }
   const versions = readProjectVersions()[projectId] || [];
+  const templates = (readPromptTemplates()[projectId] || [])
+    .filter((template) => template && template.projectId === projectId)
+    .map((template) => cloneJson(template));
   const allJobs = readGenerationJobs();
   const jobs = [];
   const warnings = [];
@@ -619,6 +741,7 @@ const handleProjectExport = async (req, res) => {
     projectId,
     project: [exportedProject],
     versions: exportedVersions,
+    templates,
     jobs,
     assets: safeAssets,
     uploads: uploadManifestForReferences(references),
@@ -638,9 +761,21 @@ const validateImportEnvelope = (body, routeProjectId) => {
   const pathError = validateImportedPaths(project, routeProjectId);
   if (pathError) throw importError(pathError);
   const versions = body.versions === undefined ? [] : body.versions;
+  const templates = body.templates === undefined ? [] : body.templates;
   const jobs = body.jobs === undefined ? [] : body.jobs;
   const assets = body.assets === undefined ? [] : body.assets;
-  if (!Array.isArray(versions) || !Array.isArray(jobs) || !Array.isArray(assets)) throw importError('versions, jobs, and assets must be arrays.');
+  if (!Array.isArray(versions) || !Array.isArray(templates) || !Array.isArray(jobs) || !Array.isArray(assets)) throw importError('versions, templates, jobs, and assets must be arrays.');
+  const seenTemplates = new Set();
+  const cleanTemplates = templates.map((template, index) => {
+    if (!isPlainObject(template)) throw importError(`Invalid template at index ${index}.`);
+    const validation = validateTemplatePayload(template, { projectId: routeProjectId, imported: true });
+    if (!validation.ok) throw importError(`Invalid template at index ${index}: ${validation.message}`);
+    if (seenTemplates.has(template.templateId)) throw importError(`Duplicate template id: ${template.templateId}.`);
+    seenTemplates.add(template.templateId);
+    const pathError = validateImportedPaths(template, routeProjectId, `templates[${index}]`);
+    if (pathError) throw importError(pathError);
+    return normalizePromptTemplate(template, routeProjectId);
+  });
   const seenVersions = new Set();
   const cleanVersions = versions.map((version, index) => {
     if (!isPlainObject(version) || !isValidVersionId(version.versionId) || (version.projectId !== undefined && version.projectId !== routeProjectId)) throw importError(`Invalid version at index ${index}.`);
@@ -685,7 +820,7 @@ const validateImportEnvelope = (body, routeProjectId) => {
     seenUploads.add(entry.path);
     return cloneJson(entry);
   });
-  return { project, versions: cleanVersions, jobs: cleanJobs, assets: cleanAssets, uploads: cleanUploads };
+  return { project, versions: cleanVersions, templates: cleanTemplates, jobs: cleanJobs, assets: cleanAssets, uploads: cleanUploads };
 };
 
 const handleProjectImportUnsafe = async (req, res) => {
@@ -706,6 +841,7 @@ const handleProjectImportUnsafe = async (req, res) => {
   const originalStates = new Map([
     [projectStorePath, cloneStoreState(projectStorePath)],
     [projectVersionsPath, cloneStoreState(projectVersionsPath)],
+    [promptTemplatesPath, cloneStoreState(promptTemplatesPath)],
     [generationJobsPath, cloneStoreState(generationJobsPath)],
     [resultAssetsPath, cloneStoreState(resultAssetsPath)]
   ]);
@@ -719,6 +855,8 @@ const handleProjectImportUnsafe = async (req, res) => {
     const nextProjects = { ...projects, [projectId]: imported.project };
     const nextVersions = readProjectVersions();
     nextVersions[projectId] = imported.versions;
+    const nextTemplates = readPromptTemplates();
+    nextTemplates[projectId] = imported.templates;
     const nextJobs = readGenerationJobs();
     for (const key of Object.keys(nextJobs)) if (nextJobs[key]?.projectId === projectId) delete nextJobs[key];
     imported.jobs.forEach((job) => { nextJobs[`${projectId}:${job.jobId}`] = job; });
@@ -726,10 +864,11 @@ const handleProjectImportUnsafe = async (req, res) => {
     nextAssets[projectId] = Object.fromEntries(imported.assets.map((asset) => [asset.assetId, normalizeResultAsset(asset, projectId, asset.assetId)]).filter(([, asset]) => asset));
     writeProjectStore(nextProjects);
     writeProjectVersions(nextVersions);
+    writePromptTemplates(nextTemplates);
     writeGenerationJobs(nextJobs);
     writeResultAssets(nextAssets);
     projectImportRevisions.set(projectId, getProjectImportRevision(projectId) + 1);
-    const referenced = collectUploadReferences([imported.project, imported.versions, imported.jobs, imported.assets]);
+    const referenced = collectUploadReferences([imported.project, imported.versions, imported.templates, imported.jobs, imported.assets]);
     const manifestPaths = new Set(imported.uploads.map((entry) => entry.path));
     const warnings = [];
     if (!imported.uploads.length && referenced.size) warnings.push({ code: 'UPLOAD_MANIFEST_MISSING', message: 'Upload files are referenced but no upload manifest was provided.' });
@@ -739,7 +878,7 @@ const handleProjectImportUnsafe = async (req, res) => {
       const actualExists = Boolean(actualPath && fs.existsSync(actualPath) && !fs.statSync(actualPath).isDirectory());
       if (!actualExists) warnings.push({ code: 'UPLOAD_MISSING', path: uploadPath, message: `Referenced upload ${uploadPath} is not present on this server.` });
     }
-    sendJson(res, 200, { schemaVersion: exportImportSchemaVersion, projectId, project: imported.project, versions: imported.versions, jobs: imported.jobs, assets: imported.assets, warnings });
+    sendJson(res, 200, { schemaVersion: exportImportSchemaVersion, projectId, project: imported.project, versions: imported.versions, templates: imported.templates, jobs: imported.jobs, assets: imported.assets, warnings });
   } catch (error) {
     const rollbackErrors = restoreStoreStates(originalStates);
     rollbackErrors.forEach(({ filePath, error }) => console.error('[project-import] rollback failed for', filePath, error.message));
@@ -802,6 +941,101 @@ const handleProjectUnsafe = async (req, res) => {
 const handleProject = (req, res) => req.method === 'GET'
   ? handleProjectUnsafe(req, res)
   : withProjectDataMutation(() => handleProjectUnsafe(req, res));
+
+const projectTemplateCollectionMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/templates(?:\?.*)?$/);
+const projectTemplateItemMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/templates\/([^/?]+)(?:\/(duplicate))?(?:\?.*)?$/);
+const handlePromptTemplatesUnsafe = async (req, res) => {
+  const collectionMatch = projectTemplateCollectionMatch(req);
+  const itemMatch = projectTemplateItemMatch(req);
+  const encodedProjectId = collectionMatch?.[1] || itemMatch?.[1] || '';
+  const projectId = decodeRoutePart(encodedProjectId);
+  if (!projectId || !isValidProjectId(projectId)) {
+    sendJson(res, 400, { error: 'Invalid project id.' });
+    return;
+  }
+  const projects = readProjectStore();
+  if (!projects[projectId]) {
+    sendJson(res, 404, { error: 'Project not found.' });
+    return;
+  }
+  const templatesStore = readPromptTemplates();
+  const projectTemplates = Array.isArray(templatesStore[projectId]) ? templatesStore[projectId] : [];
+  if (collectionMatch && req.method === 'GET') {
+    sendJson(res, 200, { projectId, templates: projectTemplates.map((template) => cloneJson(template)) });
+    return;
+  }
+  if (collectionMatch && req.method === 'POST') {
+    const body = await readJsonBody(req, res);
+    if (!body) return;
+    const payload = isPlainObject(body.template) ? body.template : body;
+    const validation = validateTemplatePayload(payload, { projectId });
+    if (!validation.ok) { sendJson(res, 400, { error: validation.message }); return; }
+    const now = new Date().toISOString();
+    const template = normalizePromptTemplate({
+      ...payload,
+      templateId: createPromptTemplateId(),
+      projectId,
+      enabled: payload.enabled === undefined ? true : payload.enabled,
+      version: 1,
+      source: payload.source === undefined ? 'manual' : payload.source,
+      createdAt: now,
+      updatedAt: now
+    }, projectId);
+    if (!template) { sendJson(res, 400, { error: 'Template is malformed.' }); return; }
+    templatesStore[projectId] = [template, ...projectTemplates];
+    try { writePromptTemplates(templatesStore); }
+    catch (error) { console.error('[prompt-templates] failed to write store:', error.message); sendJson(res, 500, { error: 'Template could not be saved.' }); return; }
+    sendJson(res, 201, { projectId, template: cloneJson(template), templates: templatesStore[projectId].map((item) => cloneJson(item)) });
+    return;
+  }
+  if (itemMatch && itemMatch[3] === 'duplicate' && req.method === 'POST') {
+    const templateId = decodeRoutePart(itemMatch[2]);
+    if (!templateId || !TEMPLATE_ID_PATTERN.test(templateId)) { sendJson(res, 400, { error: 'Invalid template id.' }); return; }
+    const sourceTemplate = projectTemplates.find((template) => template.templateId === templateId);
+    if (!sourceTemplate) { sendJson(res, 404, { error: 'Template not found.' }); return; }
+    let body = {};
+    if (req.headers['content-length'] && Number(req.headers['content-length']) > 0) {
+      const parsed = await readJsonBody(req, res);
+      if (!parsed) return;
+      body = isPlainObject(parsed.template) ? parsed.template : parsed;
+    }
+    const validation = validateTemplatePayload(body, { projectId, partial: true });
+    if (!validation.ok) { sendJson(res, 400, { error: validation.message }); return; }
+    const now = new Date().toISOString();
+    const template = normalizePromptTemplate({ ...sourceTemplate, ...body, templateId: createPromptTemplateId(), projectId, version: 1, source: body.source === undefined ? 'duplicate' : body.source, createdAt: now, updatedAt: now }, projectId);
+    templatesStore[projectId] = [template, ...projectTemplates];
+    try { writePromptTemplates(templatesStore); }
+    catch (error) { console.error('[prompt-templates] failed to write store:', error.message); sendJson(res, 500, { error: 'Template could not be saved.' }); return; }
+    sendJson(res, 201, { projectId, template: cloneJson(template), templates: templatesStore[projectId].map((item) => cloneJson(item)) });
+    return;
+  }
+  if ((itemMatch && req.method === 'PATCH') || (collectionMatch && req.method === 'PATCH')) {
+    const routeTemplateId = itemMatch ? decodeRoutePart(itemMatch[2]) : '';
+    const body = await readJsonBody(req, res);
+    if (!body) return;
+    const requestedTemplateId = routeTemplateId || body.templateId || body.template?.templateId;
+    if (!requestedTemplateId || !TEMPLATE_ID_PATTERN.test(requestedTemplateId)) { sendJson(res, 400, { error: 'A valid template id is required.' }); return; }
+    const existing = projectTemplates.find((template) => template.templateId === requestedTemplateId);
+    if (!existing) { sendJson(res, 404, { error: 'Template not found.' }); return; }
+    const payload = isPlainObject(body.template) ? body.template : body;
+    if (hasOwn(payload, 'version') || (itemMatch && hasOwn(payload, 'templateId'))) { sendJson(res, 400, { error: 'Template id and version are managed by the server.' }); return; }
+    const patch = { ...payload };
+    delete patch.templateId;
+    const validation = validateTemplatePayload(patch, { projectId, partial: true });
+    if (!validation.ok) { sendJson(res, 400, { error: validation.message }); return; }
+    const next = normalizePromptTemplate({ ...existing, ...patch, templateId: requestedTemplateId, projectId, version: existing.version + 1, updatedAt: new Date().toISOString() }, projectId);
+    if (!next) { sendJson(res, 400, { error: 'Template is malformed.' }); return; }
+    templatesStore[projectId] = projectTemplates.map((template) => template.templateId === requestedTemplateId ? next : template);
+    try { writePromptTemplates(templatesStore); }
+    catch (error) { console.error('[prompt-templates] failed to write store:', error.message); sendJson(res, 500, { error: 'Template could not be saved.' }); return; }
+    sendJson(res, 200, { projectId, template: cloneJson(next), templates: templatesStore[projectId].map((item) => cloneJson(item)) });
+    return;
+  }
+  sendJson(res, 405, { error: 'Method not allowed.' });
+};
+const handlePromptTemplates = (req, res) => req.method === 'GET'
+  ? handlePromptTemplatesUnsafe(req, res)
+  : withProjectDataMutation(() => handlePromptTemplatesUnsafe(req, res));
 
 const projectVersionCollectionMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions(?:\?.*)?$/);
 const projectVersionDiffMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions\/([^/?]+)\/diff(?:\?.*)?$/);
@@ -1970,6 +2204,7 @@ const server = http.createServer(async (req, res) => {
     await withProjectDataMutation(() => handleResultAssets(req, res));
     return;
   }
+  if (/^\/api\/projects\/[^/?]+\/templates(?:\/[^/?]+(?:\/duplicate)?)?(?:\?.*)?$/.test(req.url)) { await handlePromptTemplates(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/versions(?:\/[^/?]+\/(?:diff|restore))?(?:\?.*)?$/.test(req.url)) { await handleProjectVersions(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await withProjectDataMutation(() => handleAssetUpload(req, res)); return; }
   if ((req.method === 'GET' || req.method === 'PUT') && /^\/api\/projects\//.test(req.url)) { await handleProject(req, res); return; }
