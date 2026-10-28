@@ -210,6 +210,12 @@
       let latestAgentDraftVersion = 0;
       let aReferenceImageUrl = '';
       let promptB = '';
+      let negativePrompt = '';
+      let aspectRatio = '4:5';
+      let platformParams = {};
+      let promptBSource = 'workbench';
+      let promptBVersion = 1;
+      const allowedAspectRatios = ['1:1', '4:5', '3:4', '9:16', '16:9'];
       let resultGenerated = false;
       let resultSelected = -1;
       let generatedResults = [];
@@ -260,6 +266,11 @@
             currentAgentRunVersion,
             aReferenceImageUrl,
             promptB,
+            negativePrompt,
+            aspectRatio,
+            platformParams,
+            promptBSource,
+            promptBVersion,
             resultGenerated,
             resultSelected,
             generatedResults: persistedResults(),
@@ -284,8 +295,9 @@
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
           selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
-          descriptionA, promptB, resultGenerated, resultSelected, product: productState, versions,
+          descriptionA, promptB, negativePrompt, aspectRatio, platformParams, promptBSource, promptBVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
+          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, source: promptBSource, version: promptBVersion },
           descriptionAStructured,
           agentWarnings,
           descriptionADraft,
@@ -384,13 +396,13 @@
         if (progress > 2) {
           const accepted = window.confirm('更换 A 版参考图会影响提示词 B 和生成结果。是否清除下游内容并继续？');
           if (!accepted) return;
-          resetDownstream(2);
         }
         showToast('正在上传 A 版参考图');
         try {
           const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.url) throw new Error(payload.error || 'A 版参考图上传失败');
+          if (progress > 2) resetDownstream(2);
           aReferenceImageUrl = payload.url;
           persistState();
           await syncProject();
@@ -775,6 +787,12 @@
           descriptionAFieldEdits,
           aReferenceImageUrl,
           promptB,
+          negativePrompt,
+          aspectRatio,
+          platformParams,
+          promptBSource,
+          promptBVersion,
+          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, source: promptBSource, version: promptBVersion },
           resultGenerated,
           resultSelected,
           product: { ...productState }
@@ -915,7 +933,7 @@
           setStatus('等待回答');
         }
         if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; refreshAgentWarningPanel(); }
-        if (stepIndex < 3) promptB = '';
+        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; promptBSource = 'workbench'; promptBVersion = 1; }
         if (stepIndex < 4) {
           resultGenerated = false;
           resultSelected = -1;
@@ -995,9 +1013,9 @@
         revealDetail(detail);
         node.classList.add('is-expanded');
         if (stepName === 'a') {
-          host.innerHTML = `<p>Agent 已经把商品事实和画面方向整理成一份简报，你可以在提交前调整文字。A 版可附加一张参考图；图片不会发送给文字 Agent，只会随确认后的创作输入保存并用于后续生图。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA || defaultDescription())}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p>Agent 已经把商品事实和画面方向整理成一份简报，你可以在提交前调整文字。A 版可附加一张参考图；图片不会发送给文字 Agent，只会随确认后的创作输入保存并用于后续生图。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
-          host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">提示词 B<textarea id="prompt-editor">${escapeHtml(promptB || defaultPrompt())}</textarea></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
           host.innerHTML = `<p class="generation-intro">选择一个或多个平台。每个平台独立检查登录和提交；单个平台失败不会影响其他平台。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '网页扩展' : '网页适配'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">不满意？重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
@@ -1427,7 +1445,7 @@
       const collectAgentDraftPatch = () => {
         const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
         const baseDraft = run?.output?.draft || descriptionADraft || {};
-        const nextDescription = document.querySelector('#description-editor')?.value.trim() || defaultDescription();
+        const nextDescription = document.querySelector('#description-editor')?.value.trim() || '';
         const patch = {};
         if (nextDescription !== String(baseDraft.rawText || descriptionA || '').trim()) patch.rawText = nextDescription;
         const fields = {};
@@ -1501,8 +1519,21 @@
         if (showFeedback) showToast('简报修改已保存');
         return { changed: true, run };
       };
+      const validateDescriptionAConfirmation = (nextDescription) => {
+        const currentRun = agentRunHistory.find((item) => item.runId === currentAgentRunId);
+        if (currentRun?.accepted) return [];
+        const fieldValue = (key) => detailContent.querySelector(`[data-agent-field="${key}"]`)?.value.trim() || '';
+        const errors = [];
+        if (!nextDescription) errors.push('A 版原始文本不能为空');
+        if (!fieldValue('productFactsSummary')) errors.push('请补充商品事实摘要');
+        if (!fieldValue('scene')) errors.push('请补充场景');
+        if (!fieldValue('mustKeep').split(/\r?\n/).map((item) => item.trim()).filter(Boolean).length) errors.push('请至少填写一条必须保留项');
+        return errors;
+      };
       const confirmDescription = async () => {
         const { nextDescription, changed } = collectAgentDraftPatch();
+        const semanticErrors = validateDescriptionAConfirmation(nextDescription);
+        if (semanticErrors.length) { showToast(semanticErrors[0]); return; }
         if (changed && progress > 3) {
           const accepted = window.confirm('A 版简报已修改。提示词 B 和已生成结果需要重做。是否清除这些下游内容并继续？');
           if (!accepted) return;
@@ -1547,15 +1578,26 @@
         openDetail('b');
         showToast('描述词 A 已确认，提示词 B 已解锁');
       };
+      const readBExecutionFields = () => {
+        const positivePrompt = document.querySelector('#prompt-editor')?.value.trim() || '';
+        const nextNegativePrompt = document.querySelector('#negative-prompt-editor')?.value.trim() || '';
+        const nextAspectRatio = allowedAspectRatios.includes(document.querySelector('#aspect-ratio-editor')?.value) ? document.querySelector('#aspect-ratio-editor').value : '4:5';
+        return { positivePrompt, negativePrompt: nextNegativePrompt, aspectRatio: nextAspectRatio };
+      };
       const confirmPrompt = () => {
-        const nextPrompt = document.querySelector('#prompt-editor')?.value.trim() || defaultPrompt();
-        const changed = Boolean(promptB && nextPrompt !== promptB);
+        const bFields = readBExecutionFields();
+        const nextPrompt = bFields.positivePrompt;
+        if (!nextPrompt) { showToast('请填写正向提示词 B'); return; }
+        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio));
         if (changed && progress > 4) {
           const accepted = window.confirm('提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
           if (!accepted) return;
           resetDownstream(3);
         }
         promptB = nextPrompt;
+        negativePrompt = bFields.negativePrompt;
+        aspectRatio = bFields.aspectRatio;
+        promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
         progress = Math.max(progress, 4);
         markStepComplete(3);
         setCurrentStep(4, '等待生成');
@@ -1572,15 +1614,19 @@
         nextButton.click();
       };
       const resendPromptB = () => {
-        const nextPrompt = document.querySelector('#prompt-editor')?.value.trim() || defaultPrompt();
-        if (!nextPrompt) { showToast('请先填写提示词 B'); return; }
-        const changed = Boolean(promptB && nextPrompt !== promptB);
+        const bFields = readBExecutionFields();
+        const nextPrompt = bFields.positivePrompt;
+        if (!nextPrompt) { showToast('请填写正向提示词 B'); return; }
+        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio));
         if (changed && progress > 4) {
           const accepted = window.confirm('重新发送前会清除当前生成结果，但会保留旧任务记录。是否继续？');
           if (!accepted) return;
         }
         if (changed) resetDownstream(3);
         promptB = nextPrompt;
+        negativePrompt = bFields.negativePrompt;
+        aspectRatio = bFields.aspectRatio;
+        promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
         progress = Math.max(progress, 4);
         markStepComplete(3);
         setCurrentStep(4, '等待生成');
@@ -1629,7 +1675,7 @@
           const response = await fetch(`${projectApiUrl}/generation-jobs`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Idempotency-Key': generationRequestKey },
-            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, ...(imageUrlAbsolute ? { productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
+            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, bSnapshot: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, source: promptBSource, version: promptBVersion }, ...(imageUrlAbsolute ? { referenceImageUrl: imageUrlAbsolute, productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
@@ -1641,7 +1687,7 @@
           });
           persistState();
           platforms.forEach((platform) => {
-            window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
+            window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, negativePrompt, aspectRatio, platformParams, referenceImageUrl: imageUrlAbsolute, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
           });
         } catch (error) {
           doubaoBridgeState = 'error';
@@ -2126,7 +2172,13 @@
           currentAgentRunId = saved.currentAgentRunId || '';
           currentAgentRunVersion = Number(saved.currentAgentRunVersion) || 0;
           aReferenceImageUrl = saved.aReferenceImageUrl || '';
-          promptB = saved.promptB || '';
+          const savedB = saved.promptBExecution && typeof saved.promptBExecution === 'object' ? saved.promptBExecution : saved;
+          promptB = saved.promptB || savedB.positive_prompt || savedB.positivePrompt || '';
+          negativePrompt = saved.negativePrompt || savedB.negative_prompt || savedB.negativePrompt || '';
+          aspectRatio = allowedAspectRatios.includes(saved.aspectRatio || savedB.aspect_ratio) ? (saved.aspectRatio || savedB.aspect_ratio) : '4:5';
+          platformParams = saved.platformParams && typeof saved.platformParams === 'object' ? saved.platformParams : (savedB.platform_params && typeof savedB.platform_params === 'object' ? savedB.platform_params : {});
+          promptBSource = String(saved.promptBSource || savedB.source || 'workbench').slice(0, 80) || 'workbench';
+          promptBVersion = Math.max(1, Number(saved.promptBVersion || savedB.version) || 1);
           resultGenerated = Boolean(saved.resultGenerated);
           resultSelected = Number.isInteger(saved.resultSelected) ? saved.resultSelected : -1;
           generatedResults = Array.isArray(saved.generatedResults)

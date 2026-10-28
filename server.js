@@ -14,7 +14,8 @@ const {
   normalizeAgentInputForStorage,
   nowIso,
   parseModelJson,
-  validateAgentInput
+  validateAgentInput,
+  validateAgentDraftSemantics
 } = require('./agent/agent-service');
 
 const root = __dirname;
@@ -36,6 +37,44 @@ const uploadsDir = path.join(dataDir, 'uploads');
 const assetsDir = path.join(root, 'assets');
 const projectIdPattern = /^[A-Za-z0-9_\-\u4e00-\u9fff]{1,80}$/;
 const isValidProjectId = (value) => Boolean(value && projectIdPattern.test(value));
+const ASPECT_RATIOS = new Set(['1:1', '4:5', '3:4', '9:16', '16:9']);
+const MAX_PLATFORM_PARAMS = 30;
+const limitJobString = (value, max) => String(value ?? '').trim().slice(0, max);
+const normalizePlatformParams = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).slice(0, MAX_PLATFORM_PARAMS)
+    .map(([key, item]) => [limitJobString(key, 80), typeof item === 'number' || typeof item === 'boolean' ? item : limitJobString(item, 500)])
+    .filter(([key]) => key));
+};
+const isUsableReferenceImageUrl = (value) => {
+  const candidate = String(value ?? '').trim();
+  if (!candidate) return false;
+  if (/^\/uploads\//i.test(candidate)) return true;
+  try {
+    const parsed = new URL(candidate);
+    return ['http:', 'https:'].includes(parsed.protocol) && Boolean(parsed.hostname);
+  } catch { return false; }
+};
+const normalizeReferenceImageUrl = (input = {}) => {
+  const candidates = [input.referenceImageUrl, input.productImageUrl];
+  return candidates.map((value) => String(value ?? '').trim()).find(isUsableReferenceImageUrl)?.slice(0, 2048) || '';
+};
+const normalizeBExecution = (input = {}) => {
+  const source = input.bSnapshot && typeof input.bSnapshot === 'object' ? input.bSnapshot : input;
+  const positivePrompt = limitJobString(source.positive_prompt ?? source.positivePrompt ?? input.prompt, 12000);
+  const negativePrompt = limitJobString(source.negative_prompt ?? source.negativePrompt ?? input.negativePrompt, 4000);
+  const requestedAspectRatio = source.aspect_ratio ?? source.aspectRatio ?? input.aspectRatio ?? '';
+  const aspectRatio = ASPECT_RATIOS.has(String(requestedAspectRatio))
+    ? String(source.aspect_ratio ?? source.aspectRatio ?? input.aspectRatio)
+    : '4:5';
+  const platformParams = normalizePlatformParams(source.platform_params ?? source.platformParams ?? input.platformParams);
+  const version = Math.max(1, Math.min(999999, Number(source.version ?? input.promptBVersion ?? input.version) || 1));
+  const metadata = {
+    source: limitJobString(source.source ?? input.promptBSource ?? input.source ?? 'workbench', 80) || 'workbench',
+    version
+  };
+  return { positivePrompt, negativePrompt, aspectRatio, platformParams, ...metadata };
+};
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -128,6 +167,18 @@ const handleProject = async (req, res) => {
     if (!project || typeof project !== 'object' || Array.isArray(project)) { sendJson(res, 400, { error: 'Project must be an object.' }); return; }
     const updatedAt = new Date().toISOString();
     const existingProject = store[projectId] && typeof store[projectId] === 'object' ? store[projectId] : {};
+    const projectB = project.promptBExecution && typeof project.promptBExecution === 'object'
+      ? normalizeBExecution({ ...project, ...project.promptBExecution })
+      : null;
+    if (projectB) {
+      project.promptBExecution = { positive_prompt: projectB.positivePrompt, negative_prompt: projectB.negativePrompt, aspect_ratio: projectB.aspectRatio, platform_params: projectB.platformParams, source: projectB.source, version: projectB.version };
+      project.promptB = projectB.positivePrompt;
+      project.negativePrompt = projectB.negativePrompt;
+      project.aspectRatio = projectB.aspectRatio;
+      project.platformParams = projectB.platformParams;
+      project.promptBSource = projectB.source;
+      project.promptBVersion = projectB.version;
+    }
     store[projectId] = {
       ...existingProject,
       ...project,
@@ -255,11 +306,28 @@ const normalizePlatformEntry = (entry, jobId, platform) => {
 const normalizeGenerationJob = (job) => {
   if (!job || typeof job !== 'object' || Array.isArray(job)) return job;
   const jobId = String(job.jobId || 'job');
+  const bExecution = normalizeBExecution(job);
+  const referenceImageUrl = normalizeReferenceImageUrl(job);
   const platforms = job.platforms && typeof job.platforms === 'object' && !Array.isArray(job.platforms)
     ? Object.fromEntries(Object.entries(job.platforms).map(([platform, entry]) => [platform, normalizePlatformEntry(entry, jobId, platform)]))
     : {};
   const normalized = {
     ...job,
+    prompt: bExecution.positivePrompt,
+    positivePrompt: bExecution.positivePrompt,
+    negativePrompt: bExecution.negativePrompt,
+    aspectRatio: bExecution.aspectRatio,
+    platformParams: bExecution.platformParams,
+    bSnapshot: {
+      positive_prompt: bExecution.positivePrompt,
+      negative_prompt: bExecution.negativePrompt,
+      aspect_ratio: bExecution.aspectRatio,
+      platform_params: bExecution.platformParams,
+      source: bExecution.source,
+      version: bExecution.version
+    },
+    referenceImageUrl,
+    productImageUrl: normalizeReferenceImageUrl({ productImageUrl: job.productImageUrl, referenceImageUrl }) || referenceImageUrl,
     createdAt: job.createdAt || new Date().toISOString(),
     updatedAt: job.updatedAt || job.createdAt || new Date().toISOString(),
     expiresAt: job.expiresAt || null,
@@ -292,7 +360,10 @@ const handleGenerationJobsUnsafe = async (req, res) => {
       sendJson(res, 400, { error: 'Choose one or more supported generation platforms.' });
       return;
     }
-    if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 12000) {
+    const bExecution = normalizeBExecution(input);
+    const bSource = input.bSnapshot && typeof input.bSnapshot === 'object' ? input.bSnapshot : input;
+    const rawPositivePrompt = bSource.positive_prompt ?? bSource.positivePrompt ?? (input.bSnapshot ? '' : input.prompt);
+    if (!bExecution.positivePrompt || typeof rawPositivePrompt !== 'string' || !rawPositivePrompt.trim() || rawPositivePrompt.length > 12000) {
       sendJson(res, 400, { error: 'A prompt of up to 12000 characters is required.' });
       return;
     }
@@ -307,8 +378,21 @@ const handleGenerationJobsUnsafe = async (req, res) => {
     const job = {
       jobId,
       projectId,
-      prompt: input.prompt.trim(),
-      productImageUrl: typeof input.productImageUrl === 'string' ? input.productImageUrl.slice(0, 2048) : '',
+      prompt: bExecution.positivePrompt,
+      positivePrompt: bExecution.positivePrompt,
+      negativePrompt: bExecution.negativePrompt,
+      aspectRatio: bExecution.aspectRatio,
+      platformParams: bExecution.platformParams,
+      bSnapshot: {
+        positive_prompt: bExecution.positivePrompt,
+        negative_prompt: bExecution.negativePrompt,
+        aspect_ratio: bExecution.aspectRatio,
+        platform_params: bExecution.platformParams,
+        source: bExecution.source,
+        version: bExecution.version
+      },
+      referenceImageUrl: normalizeReferenceImageUrl(input),
+      productImageUrl: normalizeReferenceImageUrl({ productImageUrl: input.productImageUrl, referenceImageUrl: normalizeReferenceImageUrl(input) }),
       sourceJobId: typeof input.sourceJobId === 'string' ? input.sourceJobId.slice(0, 120) : '',
       resendType: typeof input.resendType === 'string' ? input.resendType.slice(0, 40) : '',
       ...(idempotencyKey ? { idempotencyKey } : {}),
@@ -726,6 +810,7 @@ const handleAgentRuns = async (req, res) => {
           field.updatedAt = timestamp;
         });
       }
+      const allowIncompleteSemanticMinimum = Boolean(run.accepted && validateAgentDraftSemantics(run.output.draft).length);
       const restoredRun = {
         ...createAgentRunRecord({
           runId: restoredRunId,
@@ -735,7 +820,8 @@ const handleAgentRuns = async (req, res) => {
           version: restoredVersion,
           createdAt: timestamp
         }),
-        restoredFromRunId: run.runId
+        restoredFromRunId: run.runId,
+        ...(allowIncompleteSemanticMinimum ? { legacyCompatibility: { allowIncompleteSemanticMinimum: true, sourceRunId: run.runId } } : {})
       };
       const persisted = persistProjectAgentRun(projectId, restoredRun, { isNewRun: true });
       if (!persisted.ok) { sendJson(res, 500, { error: 'Restored Agent run could not be saved.', errorCode: persisted.code }); return; }
@@ -746,6 +832,13 @@ const handleAgentRuns = async (req, res) => {
       if (run.status !== 'completed' || !run.output?.draft) {
         sendJson(res, 409, { error: 'Only a completed A版 draft can be accepted.', errorCode: AGENT_ERROR_CODES.MODEL_SCHEMA_INVALID });
         return;
+      }
+      if (!run.accepted && !run.legacyCompatibility?.allowIncompleteSemanticMinimum) {
+        const semanticErrors = validateAgentDraftSemantics(run.output.draft);
+        if (semanticErrors.length) {
+          sendJson(res, 409, { error: semanticErrors[0].message, errorCode: AGENT_ERROR_CODES.MODEL_SCHEMA_INVALID, fields: semanticErrors });
+          return;
+        }
       }
       const timestamp = nowIso();
       run.accepted = true;

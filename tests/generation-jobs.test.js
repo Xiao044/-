@@ -318,3 +318,49 @@ test('extension_disconnected is terminal failure and preserves protocol error fi
   assert.equal(persisted.errorMessage, 'bridge timeout');
   assert.equal((await (await fetch(`${base}/api/projects/demo/generation-jobs/${job.jobId}`)).json()).job.status, 'failed');
 });
+
+
+test('generation POST validates and persists the B execution snapshot and reference image', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-generation-b-snapshot-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, { dataDir });
+  const response = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ platforms: ['doubao'], positivePrompt: 'positive execution prompt', negativePrompt: 'blur, text', aspectRatio: 'bad-ratio', platformParams: { seed: 42, quality: 'high' }, source: 'manual-editor', version: 7, referenceImageUrl: 'https://cdn.example.test/reference.png' })
+  });
+  assert.equal(response.status, 201);
+  const job = (await response.json()).job;
+  assert.equal(job.prompt, 'positive execution prompt');
+  assert.equal(job.referenceImageUrl, 'https://cdn.example.test/reference.png');
+  assert.equal(job.productImageUrl, 'https://cdn.example.test/reference.png');
+  assert.equal(job.negativePrompt, 'blur, text');
+  assert.equal(job.aspectRatio, '4:5');
+  assert.deepEqual(job.platformParams, { seed: 42, quality: 'high' });
+  assert.deepEqual(job.bSnapshot, { positive_prompt: 'positive execution prompt', negative_prompt: 'blur, text', aspect_ratio: '4:5', platform_params: { seed: 42, quality: 'high' }, source: 'manual-editor', version: 7 });
+  server.child.kill();
+  await new Promise((resolve) => server.child.once('exit', resolve));
+  const restarted = await startServer(t, { dataDir });
+  const persisted = (await (await fetch(restarted.base + '/api/projects/demo/generation-jobs/' + job.jobId)).json()).job;
+  assert.equal(persisted.referenceImageUrl, job.referenceImageUrl);
+  assert.deepEqual(persisted.bSnapshot, job.bSnapshot);
+});
+
+test('generation POST rejects an empty positive or raw prompt', async (t) => {
+  const server = await startServer(t);
+  const response = await json(server.base, '/api/projects/demo/generation-jobs', { method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: '   ' }) });
+  assert.equal(response.status, 400);
+  const conflictingSnapshot = await json(server.base, '/api/projects/demo/generation-jobs', { method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: 'legacy prompt', bSnapshot: { positive_prompt: '   ' } }) });
+  assert.equal(conflictingSnapshot.status, 400);
+});
+
+test('frontend guards A and B semantic minimums and orders A image reset after upload success', () => {
+  const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(source, /validateDescriptionAConfirmation/);
+  assert.match(source, /请填写正向提示词 B/);
+  const uploadStart = source.indexOf('const uploadABriefImage');
+  const uploadEnd = source.indexOf('const restoreProjectFromServer', uploadStart);
+  const uploadBlock = source.slice(uploadStart, uploadEnd);
+  assert.ok(uploadBlock.indexOf('if (!response.ok || !payload.url)') < uploadBlock.indexOf('resetDownstream(2)'));
+  assert.match(source, /referenceImageUrl/);
+  assert.match(source, /promptBExecution/);
+});

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
@@ -18,10 +19,11 @@ const getAvailablePort = () => new Promise((resolve, reject) => {
   });
 });
 
-const startServer = async (t, { apiKey = '', mock = false } = {}) => {
+const startServer = async (t, { apiKey = '', mock = false, dataDir = '' } = {}) => {
   const port = await getAvailablePort();
   const env = { ...process.env, PORT: String(port), DEEPSEEK_BASE_URL: 'https://mock.deepseek.invalid', DEEPSEEK_MODEL: '4.0flash' };
   env.DEEPSEEK_API_KEY = apiKey;
+  if (dataDir) env.ZAOTU_DATA_DIR = dataDir;
   const child = spawn(process.execPath, [...(mock ? ['-r', mockPath] : []), serverPath], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   child.stdout.on('data', (chunk) => { logs += chunk; });
@@ -115,6 +117,16 @@ test('POST /api/agent keeps follow-up response compatible', async (t) => {
   assert.equal(output.followUpQuestion, '希望使用什么背景？');
   assert.equal(output.descriptionA, '');
   assert.equal(output.draft, null);
+});
+
+test('initial A normalization stays editable when optional structured fields are missing', async (t) => {
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const response = await post(baseUrl, validBody('__mock_missing_optional_fields__'));
+  assert.equal(response.status, 200);
+  const output = await response.json();
+  assert.equal(output.descriptionA.length > 0, true);
+  assert.equal(output.draft.fields.scene.value, '');
+  assert.deepEqual(output.draft.fields.mustKeep.value, ['商品主体']);
 });
 
 test('project Agent runs are persisted and listed without changing the legacy response contract', async (t) => {
@@ -375,6 +387,52 @@ test('follow-up runs do not advance A versions and accepting an older run keeps 
   assert.equal(listed.latestRunId, second.runId);
   assert.equal(listed.acceptedRunId, first.runId);
   assert.equal(listed.latestDraftVersion, 2);
+});
+
+test('new A runs with missing semantic fields are rejected only at acceptance', async (t) => {
+  const projectsPath = path.join(root, 'data', 'projects.json');
+  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
+  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
+  const isolatedProjects = JSON.parse(originalProjects);
+  delete isolatedProjects['demo-pearl-necklace'].agent;
+  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects), 'utf8');
+  const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
+  const created = await fetch(baseUrl + '/api/projects/demo-pearl-necklace/agent-runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validBody('__mock_missing_optional_fields__')) });
+  assert.equal(created.status, 201);
+  const run = (await created.json()).run;
+  assert.equal(run.output.draft.fields.scene.value, '');
+  const accepted = await fetch(baseUrl + '/api/projects/demo-pearl-necklace/agent-runs/' + encodeURIComponent(run.runId) + '/accept', { method: 'POST' });
+  assert.equal(accepted.status, 409);
+});
+
+test('migrated accepted A drafts with missing semantic fields remain confirmable', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-agent-legacy-accepted-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const legacyRun = {
+    runId: 'legacy-run', schemaVersion: 1, task: 'description_a', status: 'completed', version: 1,
+    input: { task: 'description_a', projectId: 'legacy-project', product: {}, creativeDirection: { scene: '', note: '' }, conversation: [] },
+    output: { schemaVersion: 1, runId: 'legacy-run', task: 'description_a', descriptionA: '历史 A 版', descriptionAStructured: { productFactsSummary: '商品事实' }, draft: { schemaVersion: 1, rawText: '历史 A 版', fields: { productFactsSummary: { value: '商品事实', source: 'agent', version: 1 } }, userFacts: {} }, warnings: [] },
+    accepted: true, acceptedAt: '2026-10-27T00:00:00.000Z', acceptedVersion: 1, createdAt: '2026-10-27T00:00:00.000Z', completedAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z'
+  };
+  fs.writeFileSync(path.join(dataDir, 'projects.json'), JSON.stringify({ 'legacy-project': { projectId: 'legacy-project', progress: 4, agent: { schemaVersion: 1, latestRunId: 'legacy-run', acceptedRunId: 'legacy-run', latestDraftVersion: 1, runs: [legacyRun] } } }), 'utf8');
+  const baseUrl = await startServer(t, { dataDir });
+  const endpoint = baseUrl + '/api/projects/legacy-project/agent-runs/legacy-run/accept';
+  const restore = await fetch(baseUrl + '/api/projects/legacy-project/agent-runs/legacy-run/restore', { method: 'POST' });
+  assert.equal(restore.status, 201);
+  const restoredRun = (await restore.json()).run;
+  assert.equal(restoredRun.accepted, false);
+  assert.equal(restoredRun.legacyCompatibility.allowIncompleteSemanticMinimum, true);
+  const restoredAccept = await fetch(baseUrl + '/api/projects/legacy-project/agent-runs/' + encodeURIComponent(restoredRun.runId) + '/accept', { method: 'POST' });
+  assert.equal(restoredAccept.status, 200);
+  const afterRestore = (await (await fetch(baseUrl + '/api/projects/legacy-project/agent-runs')).json()).runs;
+  const originalAfterRestore = afterRestore.find((item) => item.runId === 'legacy-run');
+  assert.equal(originalAfterRestore.accepted, true);
+  assert.equal(originalAfterRestore.output.draft.fields.scene, undefined);
+  const first = await fetch(endpoint, { method: 'POST' });
+  assert.equal(first.status, 200);
+  const second = await fetch(endpoint, { method: 'POST' });
+  assert.equal(second.status, 200);
+  assert.equal((await second.json()).run.accepted, true);
 });
 
 test('ordinary project saves cannot erase server-owned Agent history', async (t) => {

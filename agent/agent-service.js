@@ -388,15 +388,36 @@ const normalizeAgentDraft = (result, input, { version = 1, updatedAt = nowIso() 
   };
 };
 
-const legacyStructured = (draft) => ({
-  subject: draft.fields.productFactsSummary.value,
-  productFactsSummary: draft.fields.productFactsSummary.value,
-  scene: draft.fields.scene.value,
-  composition: draft.fields.composition.value,
-  lightingMood: draft.fields.lightingMood.value,
-  mustKeep: draft.fields.mustKeep.value,
-  forbidden: draft.fields.forbidden.value
-});
+const validateAgentDraftSemantics = (draft) => {
+  const fields = isPlainObject(draft?.fields) ? draft.fields : {};
+  const valueFor = (name) => fieldValue(fields[name]);
+  const errors = [];
+  if (!String(draft?.rawText || '').trim()) errors.push({ field: 'descriptionA', message: 'A 版原始文本不能为空。' });
+  if (!String(valueFor('productFactsSummary') || '').trim()) errors.push({ field: 'productFactsSummary', message: 'A 版必须包含商品事实摘要。' });
+  if (!String(valueFor('scene') || '').trim()) errors.push({ field: 'scene', message: 'A 版必须包含场景。' });
+  if (!Array.isArray(valueFor('mustKeep')) || !valueFor('mustKeep').some((item) => String(item || '').trim())) {
+    errors.push({ field: 'mustKeep', message: 'A 版必须包含至少一条必须保留项。' });
+  }
+  return errors;
+};
+
+const legacyStructured = (draft) => {
+  const valueFor = (name) => {
+    const value = draft?.fields?.[name];
+    if (isPlainObject(value) && Object.prototype.hasOwnProperty.call(value, 'value')) return value.value;
+    return ARRAY_FIELDS.has(name) ? [] : '';
+  };
+  const productFactsSummary = valueFor('productFactsSummary');
+  return {
+    subject: productFactsSummary,
+    productFactsSummary,
+    scene: valueFor('scene'),
+    composition: valueFor('composition'),
+    lightingMood: valueFor('lightingMood'),
+    mustKeep: valueFor('mustKeep'),
+    forbidden: valueFor('forbidden')
+  };
+};
 
 const collectWarnings = (result, input, draft) => {
   const warnings = [];
@@ -522,5 +543,6 @@ module.exports = {
   parseModelJson,
   sanitizeProduct,
   userFactEntries,
-  validateAgentInput
+  validateAgentInput,
+  validateAgentDraftSemantics
 };

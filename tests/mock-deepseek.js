@@ -29,13 +29,15 @@ https.request = (_target, _options, callback) => {
               : marker === '__mock_fact_conflict__'
                 ? '黄金项链置于自然窗边，商品主体清晰呈现。'
                 : '商品主体清晰呈现于自然窗边，使用柔和光线和简洁构图。',
-            descriptionAStructured: {
-              scene: '自然窗边',
-              composition: '主体居中',
-              lightingMood: '柔和自然光',
-              mustKeep: ['商品主体'],
-              forbidden: ['文字和水印']
-            }
+            descriptionAStructured: marker === '__mock_missing_optional_fields__'
+              ? { mustKeep: ['商品主体'] }
+              : {
+                scene: '自然窗边',
+                composition: '主体居中',
+                lightingMood: '柔和自然光',
+                mustKeep: ['商品主体'],
+                forbidden: ['文字和水印']
+              }
           });
       const response = Readable.from([JSON.stringify({ choices: [{ message: { content } }] })]);
       response.statusCode = 200;
