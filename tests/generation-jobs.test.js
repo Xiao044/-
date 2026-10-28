@@ -345,6 +345,55 @@ test('generation POST validates and persists the B execution snapshot and refere
   assert.deepEqual(persisted.bSnapshot, job.bSnapshot);
 });
 
+test('generation POST strictly validates new B snapshots while preserving legacy normalization', async (t) => {
+  const server = await startServer(t);
+  const invalidRatio = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ platforms: ['doubao'], bSnapshot: { positive_prompt: 'modern prompt', aspect_ratio: 'bad-ratio', platform_params: {} } })
+  });
+  assert.equal(invalidRatio.status, 400);
+  assert.equal((await invalidRatio.json()).errorCode, 'INVALID_ASPECT_RATIO');
+
+  const malformedRatio = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ platforms: ['doubao'], aspectRatio: '4:5', bSnapshot: { positive_prompt: 'modern prompt', aspect_ratio: ['4:5'], platform_params: {} } })
+  });
+  assert.equal(malformedRatio.status, 400);
+  assert.equal((await malformedRatio.json()).errorCode, 'INVALID_ASPECT_RATIO');
+
+  const malformedFields = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ platforms: ['doubao'], bSnapshot: { positive_prompt: 'modern prompt', aspect_ratio: '4:5', negative_prompt: null, source: {}, version: '2', platform_params: {} } })
+  });
+  assert.equal(malformedFields.status, 400);
+  assert.equal((await malformedFields.json()).errorCode, 'INVALID_B_EXECUTION');
+
+  const invalidParams = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ platforms: ['doubao'], bSnapshot: { positive_prompt: 'modern prompt', aspect_ratio: '4:5', platform_params: { seed: { nested: true } } } })
+  });
+  assert.equal(invalidParams.status, 400);
+  assert.equal((await invalidParams.json()).errorCode, 'INVALID_PLATFORM_PARAMS');
+
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    const pollutedParams = await json(server.base, '/api/projects/demo/generation-jobs', {
+      method: 'POST',
+      body: JSON.stringify({ platforms: ['doubao'], bSnapshot: { positive_prompt: 'modern prompt', aspect_ratio: '4:5', platform_params: { [key]: 'blocked' } } })
+    });
+    assert.equal(pollutedParams.status, 400);
+    assert.equal((await pollutedParams.json()).errorCode, 'INVALID_PLATFORM_PARAMS');
+  }
+
+  const legacy = await json(server.base, '/api/projects/demo/generation-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ platforms: ['doubao'], positivePrompt: 'legacy prompt', aspectRatio: 'bad-ratio', platformParams: ['ignored'] })
+  });
+  assert.equal(legacy.status, 201);
+  const legacyJob = (await legacy.json()).job;
+  assert.equal(legacyJob.aspectRatio, '4:5');
+  assert.deepEqual(legacyJob.platformParams, {});
+});
+
 test('generation POST rejects an empty positive or raw prompt', async (t) => {
   const server = await startServer(t);
   const response = await json(server.base, '/api/projects/demo/generation-jobs', { method: 'POST', body: JSON.stringify({ platforms: ['doubao'], prompt: '   ' }) });
@@ -363,4 +412,8 @@ test('frontend guards A and B semantic minimums and orders A image reset after u
   assert.ok(uploadBlock.indexOf('if (!response.ok || !payload.url)') < uploadBlock.indexOf('resetDownstream(2)'));
   assert.match(source, /referenceImageUrl/);
   assert.match(source, /promptBExecution/);
+  assert.match(source, /platform-params-editor/);
+  assert.match(source, /parsePlatformParamsEditor/);
+  assert.match(source, /validateBExecution/);
+  assert.match(source, /JSON.stringify\(bFields\.platformParams\)/);
 });

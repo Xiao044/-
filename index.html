@@ -216,6 +216,34 @@
       let promptBSource = 'workbench';
       let promptBVersion = 1;
       const allowedAspectRatios = ['1:1', '4:5', '3:4', '9:16', '16:9'];
+      const maxPlatformParams = 30;
+      const validatePlatformParams = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, message: '平台参数必须是 JSON 对象' };
+        const entries = Object.entries(value);
+        if (entries.length > maxPlatformParams) return { ok: false, message: `平台参数最多填写 ${maxPlatformParams} 项` };
+        const normalized = {};
+        for (const [key, item] of entries) {
+          if (['__proto__', 'constructor', 'prototype'].includes(key)) return { ok: false, message: `平台参数键名“${key}”不允许使用` };
+          if (!key.trim() || key !== key.trim() || key.length > 80) return { ok: false, message: '平台参数键名不能为空、不能带首尾空格且最多 80 个字符' };
+          if (item === null || (typeof item === 'number' && !Number.isFinite(item)) || !['string', 'number', 'boolean'].includes(typeof item)) return { ok: false, message: `平台参数“${key}”的值必须是字符串、有限数字或布尔值` };
+          if (typeof item === 'string' && item.length > 500) return { ok: false, message: `平台参数“${key}”的值最多 500 个字符` };
+          normalized[key] = item;
+        }
+        return { ok: true, value: normalized };
+      };
+      const parsePlatformParamsEditor = (rawValue) => {
+        const raw = String(rawValue ?? '').trim();
+        if (!raw) return { ok: true, value: {} };
+        try { return validatePlatformParams(JSON.parse(raw)); } catch { return { ok: false, message: '平台参数不是有效 JSON，请检查括号和引号' }; }
+      };
+      const validateBExecution = ({ positivePrompt = '', aspectRatio: candidateAspectRatio = '', platformParams: candidatePlatformParams = {} } = {}) => {
+        const errors = [];
+        if (!String(positivePrompt).trim()) errors.push('请填写正向提示词 B');
+        if (!allowedAspectRatios.includes(candidateAspectRatio)) errors.push('请选择有效的画幅比例');
+        const params = validatePlatformParams(candidatePlatformParams);
+        if (!params.ok) errors.push(params.message);
+        return { errors, platformParams: params.ok ? params.value : {} };
+      };
       let resultGenerated = false;
       let resultSelected = -1;
       let generatedResults = [];
@@ -1015,7 +1043,7 @@
         if (stepName === 'a') {
           host.innerHTML = `<p>Agent 已经把商品事实和画面方向整理成一份简报，你可以在提交前调整文字。A 版可附加一张参考图；图片不会发送给文字 Agent，只会随确认后的创作输入保存并用于后续生图。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
-          host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
           host.innerHTML = `<p class="generation-intro">选择一个或多个平台。每个平台独立检查登录和提交；单个平台失败不会影响其他平台。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '网页扩展' : '网页适配'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">不满意？重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
@@ -1581,14 +1609,16 @@
       const readBExecutionFields = () => {
         const positivePrompt = document.querySelector('#prompt-editor')?.value.trim() || '';
         const nextNegativePrompt = document.querySelector('#negative-prompt-editor')?.value.trim() || '';
-        const nextAspectRatio = allowedAspectRatios.includes(document.querySelector('#aspect-ratio-editor')?.value) ? document.querySelector('#aspect-ratio-editor').value : '4:5';
-        return { positivePrompt, negativePrompt: nextNegativePrompt, aspectRatio: nextAspectRatio };
+        const nextAspectRatio = document.querySelector('#aspect-ratio-editor')?.value || '';
+        const params = parsePlatformParamsEditor(document.querySelector('#platform-params-editor')?.value || '');
+        const validation = validateBExecution({ positivePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {} });
+        return { positivePrompt, negativePrompt: nextNegativePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {}, errors: [...validation.errors, ...(params.ok ? [] : [params.message])] };
       };
       const confirmPrompt = () => {
         const bFields = readBExecutionFields();
         const nextPrompt = bFields.positivePrompt;
-        if (!nextPrompt) { showToast('请填写正向提示词 B'); return; }
-        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio));
+        if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
+        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams)));
         if (changed && progress > 4) {
           const accepted = window.confirm('提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
           if (!accepted) return;
@@ -1597,6 +1627,7 @@
         promptB = nextPrompt;
         negativePrompt = bFields.negativePrompt;
         aspectRatio = bFields.aspectRatio;
+        platformParams = bFields.platformParams;
         promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
         progress = Math.max(progress, 4);
         markStepComplete(3);
@@ -1616,8 +1647,8 @@
       const resendPromptB = () => {
         const bFields = readBExecutionFields();
         const nextPrompt = bFields.positivePrompt;
-        if (!nextPrompt) { showToast('请填写正向提示词 B'); return; }
-        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio));
+        if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
+        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams)));
         if (changed && progress > 4) {
           const accepted = window.confirm('重新发送前会清除当前生成结果，但会保留旧任务记录。是否继续？');
           if (!accepted) return;
@@ -1626,6 +1657,7 @@
         promptB = nextPrompt;
         negativePrompt = bFields.negativePrompt;
         aspectRatio = bFields.aspectRatio;
+        platformParams = bFields.platformParams;
         promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
         progress = Math.max(progress, 4);
         markStepComplete(3);
@@ -1638,6 +1670,9 @@
       };
       const resendGeneration = () => {
         if (!selectedGenerationPlatforms.size) { showToast('请先选择至少一个生图平台'); return; }
+        const executionValidation = validateBExecution({ positivePrompt: promptB, aspectRatio, platformParams });
+        if (executionValidation.errors.length) { showToast(executionValidation.errors[0]); return; }
+        platformParams = executionValidation.platformParams;
         if (generationJobId) invalidatedGenerationJobs.add(generationJobId);
         generationResendSourceJobId = generationJobId;
         generatedResults = [];
@@ -1652,6 +1687,9 @@
       };
       const generateResults = async () => {
         if (agentBusy || interrupted) return;
+        const executionValidation = validateBExecution({ positivePrompt: promptB, aspectRatio, platformParams });
+        if (executionValidation.errors.length) { showToast(executionValidation.errors[0]); return; }
+        platformParams = executionValidation.platformParams;
         const attemptId = ++doubaoAttemptId;
         if (!generationRequestKey) generationRequestKey = window.crypto?.randomUUID?.() || `generation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
         const platforms = [...selectedGenerationPlatforms];

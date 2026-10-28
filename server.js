@@ -46,6 +46,68 @@ const normalizePlatformParams = (value) => {
     .map(([key, item]) => [limitJobString(key, 80), typeof item === 'number' || typeof item === 'boolean' ? item : limitJobString(item, 500)])
     .filter(([key]) => key));
 };
+const hasOwn = (value, key) => Boolean(value && Object.prototype.hasOwnProperty.call(value, key));
+const isPlainObject = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const strictPlatformParams = (value) => {
+  if (value === undefined) return { ok: true, value: {} };
+  if (!isPlainObject(value)) return { ok: false, message: 'platformParams must be a JSON object.' };
+  const entries = Object.entries(value);
+  if (entries.length > MAX_PLATFORM_PARAMS) return { ok: false, message: `platformParams supports at most ${MAX_PLATFORM_PARAMS} entries.` };
+  const normalized = {};
+  for (const [rawKey, item] of entries) {
+    const key = String(rawKey);
+    if (['__proto__', 'constructor', 'prototype'].includes(key)) return { ok: false, message: `platformParams key "${key}" is not allowed.` };
+    if (!key.trim() || key !== key.trim() || key.length > 80) return { ok: false, message: 'platformParams keys must be non-empty and at most 80 characters.' };
+    if (item === null || (typeof item === 'number' && !Number.isFinite(item)) || !['string', 'number', 'boolean'].includes(typeof item)) {
+      return { ok: false, message: `platformParams value for "${key}" must be a string, finite number, or boolean.` };
+    }
+    if (typeof item === 'string' && item.length > 500) return { ok: false, message: `platformParams value for "${key}" is too long.` };
+    normalized[key] = item;
+  }
+  return { ok: true, value: normalized };
+};
+const strictBExecution = (input = {}) => {
+  if (!hasOwn(input, 'bSnapshot')) return { ok: true, legacy: true, value: normalizeBExecution(input) };
+  if (!isPlainObject(input.bSnapshot)) return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot must be a JSON object.' };
+  const source = input.bSnapshot;
+  if (!hasOwn(source, 'positive_prompt') || typeof source.positive_prompt !== 'string') {
+    return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot.positive_prompt must be a string.' };
+  }
+  if (!hasOwn(source, 'aspect_ratio') || typeof source.aspect_ratio !== 'string' || !ASPECT_RATIOS.has(source.aspect_ratio)) {
+    return { ok: false, code: 'INVALID_ASPECT_RATIO', message: 'bSnapshot.aspect_ratio must be one of 1:1, 4:5, 3:4, 9:16, or 16:9.' };
+  }
+  if (hasOwn(source, 'negative_prompt') && typeof source.negative_prompt !== 'string') {
+    return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot.negative_prompt must be a string.' };
+  }
+  if (typeof source.negative_prompt === 'string' && source.negative_prompt.length > 4000) {
+    return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot.negative_prompt must be at most 4000 characters.' };
+  }
+  if (hasOwn(source, 'source') && typeof source.source !== 'string') {
+    return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot.source must be a string.' };
+  }
+  if (typeof source.source === 'string' && source.source.length > 80) {
+    return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot.source must be at most 80 characters.' };
+  }
+  if (hasOwn(source, 'version') && (typeof source.version !== 'number' || !Number.isFinite(source.version))) {
+    return { ok: false, code: 'INVALID_B_EXECUTION', message: 'bSnapshot.version must be a finite number.' };
+  }
+  const paramsSource = hasOwn(source, 'platform_params') ? source.platform_params : undefined;
+  const params = strictPlatformParams(paramsSource);
+  if (!params.ok) return { ok: false, code: 'INVALID_PLATFORM_PARAMS', message: params.message };
+  const version = hasOwn(source, 'version') ? Math.max(1, Math.min(999999, source.version)) : 1;
+  return {
+    ok: true,
+    legacy: false,
+    value: {
+      positivePrompt: source.positive_prompt,
+      negativePrompt: source.negative_prompt ?? '',
+      aspectRatio: source.aspect_ratio,
+      platformParams: params.value,
+      source: source.source ?? 'workbench',
+      version
+    }
+  };
+};
 const isUsableReferenceImageUrl = (value) => {
   const candidate = String(value ?? '').trim();
   if (!candidate) return false;
@@ -360,7 +422,12 @@ const handleGenerationJobsUnsafe = async (req, res) => {
       sendJson(res, 400, { error: 'Choose one or more supported generation platforms.' });
       return;
     }
-    const bExecution = normalizeBExecution(input);
+    const executionValidation = strictBExecution(input);
+    if (!executionValidation.ok) {
+      sendJson(res, 400, { error: executionValidation.message, errorCode: executionValidation.code });
+      return;
+    }
+    const bExecution = executionValidation.value;
     const bSource = input.bSnapshot && typeof input.bSnapshot === 'object' ? input.bSnapshot : input;
     const rawPositivePrompt = bSource.positive_prompt ?? bSource.positivePrompt ?? (input.bSnapshot ? '' : input.prompt);
     if (!bExecution.positivePrompt || typeof rawPositivePrompt !== 'string' || !rawPositivePrompt.trim() || rawPositivePrompt.length > 12000) {
