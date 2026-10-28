@@ -71,7 +71,7 @@
       <div class="page-content">
         <section class="welcome-row" id="project">
           <div><div class="page-kicker"><svg class="ui-icon"><use href="#i-sun"/></svg>一点灵感，慢慢成像</div><h1>商品图工作台<span class="title-period">.</span></h1><p class="page-description">把商品信息变成创作方向，让每一步都有迹可循。</p></div>
-          <div class="project-tools"><button class="button button-secondary" type="button" data-open-task-center><svg class="ui-icon"><use href="#i-grid"/></svg>任务中心</button><button class="button button-secondary" type="button" data-open-asset-library><svg class="ui-icon"><use href="#i-image"/></svg>结果资产库</button><button class="button button-secondary" type="button" data-open-version-history><svg class="ui-icon"><use href="#i-clock"/></svg>版本记录</button><button class="button button-primary" type="button"><svg class="ui-icon"><use href="#i-save"/></svg>保存项目</button></div>
+          <div class="project-tools"><button class="button button-secondary" type="button" data-open-task-center><svg class="ui-icon"><use href="#i-grid"/></svg>任务中心</button><button class="button button-secondary" type="button" data-open-asset-library><svg class="ui-icon"><use href="#i-image"/></svg>结果资产库</button><button class="button button-secondary" type="button" data-open-version-history><svg class="ui-icon"><use href="#i-clock"/></svg>版本记录</button><button class="button button-secondary project-data-action" type="button" data-project-action="export"><svg class="ui-icon"><use href="#i-external"/></svg>导出项目</button><button class="button button-secondary project-data-action" type="button" data-project-action="import"><svg class="ui-icon"><use href="#i-folder"/></svg>导入项目</button><input class="project-import-input" id="project-import-input" type="file" accept="application/json,.json" aria-label="选择项目 JSON 文件"><button class="button button-primary" type="button"><svg class="ui-icon"><use href="#i-save"/></svg>保存项目</button></div>
         </section>
         <section class="workflow-panel" id="workflow" aria-labelledby="workflow-title">
           <div class="workflow-heading"><div><h2 id="workflow-title">创作流程</h2><span class="workflow-caption">一步一步，让想法更清晰</span></div><span class="workflow-hint"><svg class="ui-icon"><use href="#i-pause"/></svg>已完成步骤可点击回退</span></div>
@@ -190,9 +190,13 @@
       const currentStep = document.querySelector('.flow-step.current');
       const currentStepLabel = currentStep?.querySelector('.step-text small');
       const toast = document.querySelector('.interaction-toast');
+      const projectImportInput = document.querySelector('#project-import-input');
       const storageKey = 'zaotu-workbench-demo-v1';
       let projectId = 'demo-pearl-necklace';
       let projectApiUrl = `/api/projects/${projectId}`;
+      let projectSession = 0;
+      let latestProjectImportRequestId = 0;
+      let pendingImportedProjectReload = false;
       let toastTimer;
       let editingAgent = false;
       let interrupted = false;
@@ -483,6 +487,100 @@
           window.localStorage.setItem(storageKey, JSON.stringify(serverProject));
           window.location.reload();
         } catch (error) { /* localStorage remains the offline fallback */ }
+      };
+      const safeProjectFilename = (value) => String(value || '')
+        .normalize('NFKC')
+        .replace(/[<>:"/\\|?*\u0000-\u001F\u007F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[.-]+|[.-]+$/g, '')
+        .slice(0, 80) || 'project';
+      const projectFilename = (value) => {
+        const safe = safeProjectFilename(value);
+        const basename = safe.split('.')[0];
+        return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(basename) ? `project-${safe}`.slice(0, 80) : safe;
+      };
+      const exportProject = async () => {
+        const exportProjectId = projectId;
+        const exportRouteUrl = projectApiUrl;
+        const exportSession = projectSession;
+        const exportProjectName = projectName;
+        try {
+          const response = await fetch(`${exportRouteUrl}/export`, { cache: 'no-store', headers: { Accept: 'application/json' } });
+          const payload = await response.json().catch(() => ({}));
+          if (projectId !== exportProjectId || projectApiUrl !== exportRouteUrl || projectSession !== exportSession) return;
+          if (!response.ok) throw new Error(payload.error || '项目导出失败');
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+          const downloadUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = downloadUrl;
+          anchor.download = `${projectFilename(exportProjectName || exportProjectId)}.json`;
+          anchor.rel = 'noopener';
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+          showToast('项目已导出');
+        } catch (error) { showToast(error.message || '项目导出失败'); }
+      };
+      const reloadImportedProject = () => {
+        pendingImportedProjectReload = false;
+        closeModal();
+        window.location.reload();
+      };
+      const importProjectFromFile = async (file) => {
+        if (!file) return;
+        const activeProjectId = projectId;
+        const importRouteUrl = projectApiUrl;
+        const importSession = projectSession;
+        const importRequestId = ++latestProjectImportRequestId;
+        const isCurrentProjectImport = () => projectId === activeProjectId
+          && projectApiUrl === importRouteUrl
+          && projectSession === importSession
+          && latestProjectImportRequestId === importRequestId;
+        try {
+          const imported = JSON.parse(await file.text());
+          if (!isCurrentProjectImport()) return;
+          if (!imported || typeof imported !== 'object' || Array.isArray(imported)) throw new Error('项目文件必须是 JSON 对象');
+          const importedProject = Array.isArray(imported.project) ? imported.project[0] : imported.project;
+          if (!importedProject || typeof importedProject !== 'object' || importedProject.projectId !== activeProjectId) {
+            throw new Error('项目文件与当前项目不匹配');
+          }
+          const accepted = window.confirm('导入会替换当前项目的资料、版本、任务和结果资产元数据。确认以 replace 模式继续吗？');
+          if (!accepted) return;
+          if (!isCurrentProjectImport()) return;
+          showToast('正在导入项目');
+          const response = await fetch(`${importRouteUrl}/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ ...imported, projectId: activeProjectId, mode: 'replace' })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!isCurrentProjectImport()) return;
+          if (!response.ok) throw new Error(payload.error || '项目导入失败');
+          const importedState = payload.project && typeof payload.project === 'object' ? payload.project : importedProject;
+          if (importedState.projectId !== activeProjectId) throw new Error('导入结果的项目 ID 与当前项目不匹配');
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, projectId: activeProjectId }));
+          projectId = activeProjectId;
+          projectApiUrl = `/api/projects/${encodeURIComponent(activeProjectId)}`;
+          const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+          if (warnings.length) {
+            pendingImportedProjectReload = true;
+            const warningItems = warnings.map((warning) => {
+              const missingUpload = ['UPLOAD_MISSING', 'UPLOAD_MANIFEST_MISSING'].includes(warning.code);
+              const message = missingUpload ? `上传文件${warning.path ? ` ${warning.path}` : ''}需要检查：${warning.message || '服务器上未找到引用的文件'}` : (warning.message || warning.path || '项目导入存在需要检查的内容');
+              return `<li><strong>${escapeHtml(warning.code || 'IMPORT_WARNING')}</strong><span>${escapeHtml(message)}</span></li>`;
+            }).join('');
+            openModal('项目导入完成', `<p class="modal-note">项目数据已替换。以下上传文件需要在当前服务器上重新补齐或检查。</p><ul class="project-import-warnings">${warningItems}</ul><div class="modal-actions"><button class="button button-primary" type="button" data-modal-action="reload-imported-project">继续打开项目</button></div>`);
+          } else {
+            showToast('项目已导入');
+            window.location.reload();
+          }
+        } catch (error) {
+          if (isCurrentProjectImport()) showToast(error.message || '项目导入失败');
+        } finally {
+          if (isCurrentProjectImport() && projectImportInput) projectImportInput.value = '';
+        }
       };
       const restoreGenerationJobFromServer = async () => {
         if (!generationJobId) return;
@@ -932,6 +1030,7 @@
       const createProject = async () => {
         projectName = document.querySelector('#new-project-name')?.value.trim() || '未命名商品项目';
         const projectSlug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'project';
+        projectSession += 1;
         projectId = `${projectSlug}-${Date.now().toString(36)}`;
         projectApiUrl = `/api/projects/${encodeURIComponent(projectId)}`;
         productState = { name: '新商品', subtitle: '等待补充商品卖点', description: '请补充商品描述和希望呈现的画面方向。' };
@@ -2464,8 +2563,14 @@
       document.querySelector('[data-open-task-center]')?.addEventListener('click', () => openTaskCenter());
       document.querySelector('[data-open-asset-library]')?.addEventListener('click', () => openAssetLibrary());
       document.querySelector('[data-open-agent-history]')?.addEventListener('click', () => openAgentHistory());
+      document.querySelector('[data-project-action="export"]')?.addEventListener('click', exportProject);
+      document.querySelector('[data-project-action="import"]')?.addEventListener('click', () => projectImportInput?.click());
+      projectImportInput?.addEventListener('change', () => importProjectFromFile(projectImportInput.files?.[0]));
       document.querySelector('.new-project').addEventListener('click', openNewProject);
-      document.querySelector('.modal-close').addEventListener('click', closeModal);
+      document.querySelector('.modal-close').addEventListener('click', () => {
+        if (pendingImportedProjectReload) reloadImportedProject();
+        else closeModal();
+      });
       modal.addEventListener('click', (event) => {
         const runSelection = event.target.closest('[data-agent-run-select]');
         if (runSelection) { selectAgentHistoryRun(runSelection.dataset.agentRunSelect); return; }
@@ -2475,6 +2580,7 @@
         if (action === 'cancel') closeModal();
         if (action === 'save-product') saveProduct();
         if (action === 'create-project') createProject();
+        if (action === 'reload-imported-project') reloadImportedProject();
         const taskActionElement = event.target.closest('[data-task-action]');
         if (taskActionElement) {
           handleTaskAction(taskActionElement.dataset.taskAction, taskActionElement.dataset.taskJob || generationJobId, taskActionElement.dataset.taskPlatform || '');
@@ -2551,7 +2657,11 @@
         assetLibraryFilters[assetFilter.dataset.assetFilter] = assetFilter.type === 'checkbox' ? (assetFilter.checked ? 'true' : '') : assetFilter.value;
         fetchAssetLibrary();
       });
-      modal.addEventListener('cancel', (event) => { event.preventDefault(); closeModal(); });
+      modal.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        if (pendingImportedProjectReload) reloadImportedProject();
+        else closeModal();
+      });
 
       try {
         const saved = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
@@ -2593,7 +2703,9 @@
           productState = { ...productState, ...(saved.product || {}) };
           versions = Array.isArray(saved.versions) ? saved.versions : [];
           projectName = saved.projectName || projectName;
-          projectId = saved.projectId || projectId;
+          const savedProjectId = saved.projectId || projectId;
+          if (savedProjectId !== projectId) projectSession += 1;
+          projectId = savedProjectId;
           projectApiUrl = `/api/projects/${encodeURIComponent(projectId)}`;
           agentNote = saved.agentNote || '';
           serverUpdatedAt = saved.updatedAt || '';

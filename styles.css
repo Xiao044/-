@@ -86,6 +86,7 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
 .title-period { color: #c7a64b; margin-left: 3px; }
 .page-description { margin-top: 8px; font-size: 12px; color: #81765f; letter-spacing: .3px; }
 .project-tools { display: flex; gap: 9px; padding-bottom: 1px; }
+.project-import-input { display: none; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 0 15px; font-size: 12px; font-weight: 600; border-radius: 8px; white-space: nowrap; }
 .button .ui-icon { width: 15px; height: 15px; }
 .button-primary { background: var(--yellow); border: 1px solid #e4cc72; color: #65582b; }
@@ -294,6 +295,10 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
 .modal-field textarea { min-height: 94px; line-height: 1.8; resize: vertical; }
 .modal-field input:focus, .modal-field textarea:focus { outline: 2px solid #dfcd88; outline-offset: 1px; border-color: #d4bd70; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 19px; }
+.project-import-warnings { margin: 0; padding: 0; list-style: none; border-top: 1px solid #eee8d6; }
+.project-import-warnings li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee8d6; color: #81765f; font-size: 12px; line-height: 1.6; }
+.project-import-warnings strong { flex: 0 0 auto; color: #9a6545; font-size: 11px; }
+.project-import-warnings span { min-width: 0; }
 .version-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid #eee8d6; }
 .version-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee8d6; }
 .version-list li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -471,6 +476,7 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
   .page-kicker { font-size: 12px; letter-spacing: 1px; }
   .page-description { max-width: 225px; font-size: 12px; line-height: 1.9; }
   .project-tools .button-secondary { display: none; }
+  .project-tools .project-data-action { display: inline-flex; }
   .project-tools .button-primary { padding: 0 10px; min-height: 32px; font-size: 12px; }
   .project-tools .button-primary .ui-icon { display: none; }
   .project-tools { padding-bottom: 8px; }
@@ -659,6 +665,7 @@ h1 { font-size: 24px; line-height: 1.25; }
   .project-tools { align-self: center; }
   .project-tools .button { min-height: 32px; padding: 0 9px; font-size: 12px; }
   .project-tools .button-secondary { display: none; }
+  .project-tools .project-data-action { display: inline-flex; }
   .project-tools .button-primary .ui-icon { display: none; }
   .workflow-panel { padding: 12px; }
   .workflow-heading { margin-bottom: 8px; }

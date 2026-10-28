@@ -8,6 +8,8 @@ const net = require('node:net');
 
 const root = path.resolve(__dirname, '..');
 const serverPath = path.join(root, 'server.js');
+const indexSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const stylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
 const getPort = () => new Promise((resolve, reject) => {
   const probe = net.createServer();
   probe.once('error', reject);
@@ -50,6 +52,42 @@ const importPayload = (projectId = 'demo') => ({
   jobs: [{ jobId: 'job-import-1', projectId, prompt: 'imported', status: 'queued', platforms: {} }],
   assets: [{ assetId: 'asset-import-1', projectId, url: `/uploads/${projectId}/missing.png`, archivedUrl: `/uploads/${projectId}/missing.png`, jobId: 'job-import-1' }],
   uploads: [{ path: `/uploads/${projectId}/missing.png`, missing: true }]
+});
+
+test('frontend project tools expose export and import actions without replacing result image import', () => {
+  assert.match(indexSource, /data-project-action="export"/);
+  assert.match(indexSource, /data-project-action="import"/);
+  assert.match(indexSource, /id="project-import-input"[^>]+type="file"[^>]+accept="application\/json,\.json"/);
+  assert.match(indexSource, /data-project-action="export"[\s\S]*?fetch\(`\$\{exportRouteUrl\}\/export`/);
+  assert.match(indexSource, /new Blob\(\[JSON\.stringify\(payload, null, 2\)\]/);
+  assert.match(indexSource, /anchor\.download = `\$\{projectFilename\(exportProjectName \|\| exportProjectId\)\}\.json`/);
+  assert.match(indexSource, /const basename = safe\.split\('\.'\)\[0\]/);
+  assert.match(indexSource, /projectApiUrl !== exportRouteUrl \|\| projectSession !== exportSession/);
+  assert.match(indexSource, /id="result-upload-input"/);
+  assert.match(indexSource, /data-bridge-action="manual-result"/);
+});
+
+test('frontend import validates ownership, confirms replace mode, persists the response, and shows warnings', () => {
+  assert.match(indexSource, /JSON\.parse\(await file\.text\(\)\)/);
+  assert.match(indexSource, /window\.confirm\('导入会替换当前项目/);
+  assert.match(indexSource, /const importRouteUrl = projectApiUrl/);
+  assert.match(indexSource, /const importRequestId = \+\+latestProjectImportRequestId/);
+  assert.match(indexSource, /latestProjectImportRequestId === importRequestId/);
+  assert.match(indexSource, /projectSession === importSession/);
+  assert.match(indexSource, /fetch\(`\$\{importRouteUrl\}\/import`/);
+  assert.match(indexSource, /JSON\.stringify\(\{ \.\.\.imported, projectId: activeProjectId, mode: 'replace' \}\)/);
+  assert.match(indexSource, /importedState\.projectId !== activeProjectId/);
+  assert.match(indexSource, /window\.localStorage\.setItem\(storageKey, JSON\.stringify\(\{ \.\.\.importedState, projectId: activeProjectId \}\)\)/);
+  assert.match(indexSource, /Array\.isArray\(payload\.warnings\)/);
+  assert.match(indexSource, /UPLOAD_MISSING/);
+  assert.match(indexSource, /UPLOAD_MANIFEST_MISSING/);
+  assert.match(indexSource, /class="project-import-warnings"/);
+  assert.match(indexSource, /data-modal-action="reload-imported-project"/);
+  assert.match(indexSource, /if \(pendingImportedProjectReload\) reloadImportedProject\(\)/);
+  assert.match(indexSource, /window\.location\.reload\(\)/);
+  assert.ok(indexSource.includes('\\u202A-\\u202E'));
+  assert.match(indexSource, /CON\|PRN\|AUX\|NUL/);
+  assert.match(stylesSource, /\.project-tools \.project-data-action \{ display: inline-flex; \}/);
 });
 
 
