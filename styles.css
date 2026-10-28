@@ -874,6 +874,8 @@ h1 { font-size: 24px; line-height: 1.25; }
 .asset-library-date-filter { display: flex; min-width: 0; align-items: center; gap: 6px; color: #9b917b; font-size: 10px; }
 .asset-library-date-filter span { flex-shrink: 0; }
 .asset-library-date-filter input { width: 100%; }
+.asset-library-checkbox { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: #81765f; font-size: 10px; white-space: nowrap; }
+.asset-library-checkbox input { width: 14px; height: 14px; margin: 0; accent-color: #a28b4b; }
 .asset-library-toolbar input, .asset-library-toolbar select { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid #e8e0cc; border-radius: 6px; background: #fffdf6; color: #665d43; font: inherit; font-size: 11px; }
 .asset-library-toolbar .button { min-height: 34px; padding: 0 10px; font-size: 11px; }
 .asset-library-toolbar .button .ui-icon { width: 14px; height: 14px; }
@@ -884,6 +886,7 @@ h1 { font-size: 24px; line-height: 1.25; }
 .asset-library-state span { line-height: 1.7; }
 .asset-library-state .button { justify-self: center; margin-top: 5px; }
 .asset-card { min-width: 0; overflow: hidden; border: 1px solid #e8e0cc; border-radius: 9px; background: #fffefb; }
+.asset-card.is-deleted { border-color: #e4c9bc; background: #fffaf7; }
 .asset-card-media { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; background: #f4f0e3; }
 .asset-card-media img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s ease; }
 .asset-card-media:hover img { transform: scale(1.03); }
@@ -901,6 +904,7 @@ h1 { font-size: 24px; line-height: 1.25; }
 .asset-card-links { display: flex; flex-wrap: wrap; gap: 6px; }
 .asset-card-link { padding: 3px 6px; border: 1px solid #e8e0cc; border-radius: 4px; color: #81714e; font-size: 10px; text-decoration: none; }
 .asset-card-link:hover { border-color: #d8c77f; background: #fbf3d7; }
+.asset-card-link[type="button"] { cursor: pointer; font: inherit; }
 .asset-card-link.is-empty { border-style: dashed; color: #aaa087; }
 .asset-card-tags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 19px; }
 .asset-card-tags span { padding: 3px 5px; border-radius: 4px; background: #f1eddf; color: #81765f; font-size: 9px; }

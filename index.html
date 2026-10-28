@@ -1494,7 +1494,7 @@
           showToast(error.message || '历史草稿恢复失败');
         }
       };
-      const assetLibraryFilters = { search: '', status: '', platform: '', favorite: '', tag: '', promptVersion: '', jobId: '', attemptId: '', createdFrom: '', createdTo: '' };
+      const assetLibraryFilters = { search: '', status: '', platform: '', favorite: '', tag: '', promptVersion: '', jobId: '', attemptId: '', createdFrom: '', createdTo: '', includeDeleted: '' };
       let assetLibraryAssets = [];
       let assetLibraryLoading = false;
       let assetLibraryError = '';
@@ -1529,11 +1529,13 @@
         if (createdFrom && !Number.isFinite(Date.parse(createdFrom))) return { error: '创建开始日期无效。' };
         if (createdTo && !Number.isFinite(Date.parse(createdTo))) return { error: '创建结束日期无效。' };
         if (createdFrom && createdTo && Date.parse(createdFrom) > Date.parse(createdTo)) return { error: '创建时间范围无效。' };
+        if (assetLibraryFilters.includeDeleted === 'true') params.set('includeDeleted', 'true');
         return { query: params.toString() };
       };
       const assetLibraryFilterMarkup = () => `<div class="asset-library-toolbar">
         <input type="search" data-asset-filter="search" aria-label="搜索结果资产" placeholder="搜索编号、平台、任务、标签或来源" value="${escapeHtml(assetLibraryFilters.search)}">
-        <select data-asset-filter="status" aria-label="按状态筛选"><option value="">全部状态</option>${Object.entries(assetStatusLabels).map(([key, label]) => `<option value="${key}"${assetLibraryFilters.status === key ? ' selected' : ''}>${label}</option>`).join('')}</select>
+        <select data-asset-filter="status" aria-label="按状态筛选"><option value="">全部状态</option>${['temp', 'archived', 'invalid'].map((key) => `<option value="${key}"${assetLibraryFilters.status === key ? ' selected' : ''}>${assetStatusLabels[key]}</option>`).join('')}</select>
+        <label class="asset-library-checkbox"><input type="checkbox" data-asset-filter="includeDeleted"${assetLibraryFilters.includeDeleted === 'true' ? ' checked' : ''}>包含已删除</label>
         <select data-asset-filter="platform" aria-label="按平台筛选"><option value="">全部平台</option>${Object.entries(assetPlatformLabels).map(([key, label]) => `<option value="${key}"${assetLibraryFilters.platform === key ? ' selected' : ''}>${label}</option>`).join('')}</select>
         <select data-asset-filter="favorite" aria-label="按收藏筛选"><option value="">收藏不限</option><option value="true"${assetLibraryFilters.favorite === 'true' ? ' selected' : ''}>仅收藏</option><option value="false"${assetLibraryFilters.favorite === 'false' ? ' selected' : ''}>未收藏</option></select>
         <input type="search" data-asset-filter="tag" aria-label="按标签筛选" placeholder="标签" value="${escapeHtml(assetLibraryFilters.tag)}">
@@ -1558,19 +1560,35 @@
           const sourceUrl = String(asset.sourceUrl || '').trim();
           const archivedUrl = String(asset.archivedUrl || asset.url || '').trim();
           const isSafeAssetLink = (href) => /^https?:\/\//i.test(href) || /^\/uploads(?:\/|$)/.test(href);
-          const assetLink = (label, href) => {
-            if (!href) return `<span class="asset-card-link is-empty">${label}</span>`;
-            if (!isSafeAssetLink(href)) return `<span class="asset-card-link is-empty">${label}: ${escapeHtml(href)}</span>`;
-            return `<a class="asset-card-link" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${label}</a>`;
+          const safeAssetUrl = (href) => {
+            if (!isSafeAssetLink(href) || String(href || '').includes('..')) return '';
+            try {
+              const absolute = new URL(href, window.location.href);
+              return /^https?:$/.test(absolute.protocol) ? absolute.href : '';
+            } catch (error) { return ''; }
           };
-          return `<article class="asset-card" data-asset-id="${escapeHtml(asset.assetId)}">
-            <a class="asset-card-media" href="${escapeHtml(archivedUrl)}" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="${escapeHtml(thumbnail)}" alt="${escapeHtml(assetPlatformLabel(asset.platform))}结果缩略图"><span class="asset-card-status is-${escapeHtml(asset.status || 'archived')}">${escapeHtml(assetStatusLabel(asset.status))}</span></a>
+          const sourceAssetUrl = safeAssetUrl(sourceUrl);
+          const archivedAssetUrl = safeAssetUrl(archivedUrl);
+          const thumbnailAssetUrl = safeAssetUrl(thumbnail) || archivedAssetUrl;
+          const assetLink = (label, href, safeHref = safeAssetUrl(href)) => {
+            if (!href) return `<span class="asset-card-link is-empty">${label}</span>`;
+            if (!safeHref) return `<span class="asset-card-link is-empty">${label}: ${escapeHtml(href)}</span>`;
+            return `<a class="asset-card-link" href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer">${label}</a>`;
+          };
+          const media = archivedAssetUrl
+            ? `<a class="asset-card-media" href="${escapeHtml(archivedAssetUrl)}" target="_blank" rel="noreferrer"><img loading="lazy" decoding="async" src="${escapeHtml(thumbnailAssetUrl)}" alt="${escapeHtml(assetPlatformLabel(asset.platform))}结果缩略图"><span class="asset-card-status is-${escapeHtml(asset.status || 'archived')}">${escapeHtml(assetStatusLabel(asset.status))}</span></a>`
+            : `<div class="asset-card-media"><img loading="lazy" decoding="async" src="${escapeHtml(thumbnailAssetUrl)}" alt="${escapeHtml(assetPlatformLabel(asset.platform))}结果缩略图"><span class="asset-card-status is-${escapeHtml(asset.status || 'archived')}">${escapeHtml(assetStatusLabel(asset.status))}</span></div>`;
+          const lifecycleAction = asset.status === 'deleted'
+            ? `<button class="text-button" type="button" data-asset-action="restore" data-asset-id="${escapeHtml(asset.assetId)}">恢复</button>`
+            : `<button class="text-button is-danger" type="button" data-asset-action="delete" data-asset-id="${escapeHtml(asset.assetId)}">删除</button>`;
+          return `<article class="asset-card${asset.status === 'deleted' ? ' is-deleted' : ''}" data-asset-id="${escapeHtml(asset.assetId)}">
+            ${media}
             <div class="asset-card-body"><div class="asset-card-heading"><strong>${escapeHtml(assetPlatformLabel(asset.platform))}</strong><button class="asset-favorite${asset.favorite ? ' is-favorite' : ''}" type="button" data-asset-action="favorite" data-asset-id="${escapeHtml(asset.assetId)}" aria-pressed="${asset.favorite ? 'true' : 'false'}" aria-label="${asset.favorite ? '取消收藏' : '收藏'}">${asset.favorite ? '★' : '☆'}</button></div>
-            <dl class="asset-card-meta"><div><dt>资产 ID</dt><dd title="${escapeHtml(asset.assetId || '')}">${escapeHtml(asset.assetId || '暂无资产 ID')}</dd></div><div><dt>候选 ID</dt><dd title="${escapeHtml(asset.candidateId || '')}">${escapeHtml(asset.candidateId || '暂无候选 ID')}</dd></div><div><dt>版本</dt><dd>v${escapeHtml(asset.promptVersion || 1)}</dd></div><div><dt>尺寸</dt><dd>${escapeHtml(dimensions)}</dd></div><div><dt>创建时间</dt><dd>${escapeHtml(assetTime(asset.createdAt))}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(assetTime(asset.updatedAt))}</dd></div><div><dt>归档时间</dt><dd>${escapeHtml(assetTime(asset.archivedAt))}</dd></div><div><dt>任务</dt><dd title="${escapeHtml(asset.jobId || '')}">${escapeHtml(asset.jobId || '暂无任务')}</dd></div></dl>
-            <div class="asset-card-links">${assetLink('来源', sourceUrl)}${assetLink('已归档', archivedUrl)}</div>
+            <dl class="asset-card-meta"><div><dt>项目</dt><dd title="${escapeHtml(asset.projectId || '')}">${escapeHtml(asset.projectId || '暂无项目')}</dd></div><div><dt>资产 ID</dt><dd title="${escapeHtml(asset.assetId || '')}">${escapeHtml(asset.assetId || '暂无资产 ID')}</dd></div><div><dt>候选 ID</dt><dd title="${escapeHtml(asset.candidateId || '')}">${escapeHtml(asset.candidateId || '暂无候选 ID')}</dd></div><div><dt>版本</dt><dd>v${escapeHtml(asset.promptVersion || 1)}</dd></div><div><dt>尺寸</dt><dd>${escapeHtml(dimensions)}</dd></div><div><dt>创建时间</dt><dd>${escapeHtml(assetTime(asset.createdAt))}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(assetTime(asset.updatedAt))}</dd></div><div><dt>归档时间</dt><dd>${escapeHtml(assetTime(asset.archivedAt))}</dd></div><div><dt>任务</dt><dd title="${escapeHtml(asset.jobId || '')}">${escapeHtml(asset.jobId || '暂无任务')}</dd></div></dl>
+            <div class="asset-card-links">${assetLink('来源', sourceUrl, sourceAssetUrl)}${assetLink('已归档', archivedUrl, archivedAssetUrl)}${archivedAssetUrl ? `<button class="asset-card-link" type="button" data-asset-action="copy-url" data-asset-id="${escapeHtml(asset.assetId)}">复制绝对 URL</button>` : ''}</div>
             <div class="asset-card-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<em>暂无标签</em>'}</div>
             <div class="asset-card-tag-editor"><input type="text" data-asset-tags-input="${escapeHtml(asset.assetId)}" value="${escapeHtml(tags.join(', '))}" aria-label="${escapeHtml(asset.assetId)} 标签" placeholder="标签，用逗号分隔"><button class="text-button" type="button" data-asset-action="save-tags" data-asset-id="${escapeHtml(asset.assetId)}">保存标签</button></div>
-            <div class="asset-card-footer"><span>${escapeHtml(asset.attemptId ? `尝试 ${asset.attemptId}` : '来源已归档')}</span><button class="text-button is-danger" type="button" data-asset-action="delete" data-asset-id="${escapeHtml(asset.assetId)}">删除</button></div></div>
+            <div class="asset-card-footer"><span>${escapeHtml(asset.attemptId ? `尝试 ${asset.attemptId}` : '来源已归档')}</span>${lifecycleAction}</div></div>
           </article>`;
         }).join('');
         return `${assetLibraryFilterMarkup()}<div class="asset-library-count">显示 ${filtered.length} / ${assets.length} 项结果资产</div><div class="asset-library-grid">${cards}</div>`;
@@ -1613,11 +1631,32 @@
         const session = modalSession;
         const asset = assetLibraryAssets.find((item) => item.assetId === assetId);
         if (!asset || !isAssetLibraryView(session)) return;
+        const safeAssetUrl = (href) => {
+          const raw = String(href || '').trim();
+          if (!(/^https?:\/\//i.test(raw) || /^\/uploads(?:\/|$)/.test(raw)) || raw.includes('..')) return '';
+          try {
+            const absolute = new URL(raw, window.location.href);
+            return /^https?:$/.test(absolute.protocol) ? absolute.href : '';
+          } catch (error) { return ''; }
+        };
+        if (action === 'copy-url') {
+          const absoluteUrl = safeAssetUrl(asset.archivedUrl || asset.url);
+          if (!absoluteUrl || !navigator.clipboard?.writeText) { showToast('当前资产 URL 不可复制'); return; }
+          const copyButton = modalBody.querySelector(`[data-asset-action="copy-url"][data-asset-id="${CSS.escape(assetId)}"]`);
+          if (copyButton) copyButton.disabled = true;
+          try {
+            await navigator.clipboard.writeText(absoluteUrl);
+            if (isAssetLibraryView(session)) showToast('已复制绝对 URL');
+          } catch (error) {
+            if (isAssetLibraryView(session)) showToast('复制 URL 失败');
+          } finally { if (copyButton) copyButton.disabled = false; }
+          return;
+        }
         if (action === 'delete' && !window.confirm('删除后结果资产会移入回收状态，确定继续吗？')) return;
         const endpoint = `${projectApiUrl}/result-assets/${encodeURIComponent(assetId)}`;
         const options = action === 'delete'
           ? { method: 'DELETE' }
-          : { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'favorite' ? { favorite: !asset.favorite } : { tags: String(modalBody.querySelector(`[data-asset-tags-input="${CSS.escape(assetId)}"]`)?.value || '').split(',').map((tag) => tag.trim()).filter(Boolean) }) };
+          : { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'favorite' ? { favorite: !asset.favorite } : action === 'restore' ? { status: 'archived' } : { tags: String(modalBody.querySelector(`[data-asset-tags-input="${CSS.escape(assetId)}"]`)?.value || '').split(',').map((tag) => tag.trim()).filter(Boolean) }) };
         const button = modalBody.querySelector(`[data-asset-action="${action}"][data-asset-id="${CSS.escape(assetId)}"]`);
         if (button) button.disabled = true;
         try {
@@ -1626,7 +1665,7 @@
           if (!response.ok) throw new Error(payload.error || '结果资产更新失败');
           if (!isAssetLibraryView(session)) return;
           await fetchAssetLibrary({ session });
-          if (isAssetLibraryView(session)) showToast(action === 'delete' ? '结果资产已删除' : action === 'favorite' ? (payload.asset?.favorite ? '已收藏结果资产' : '已取消收藏') : '标签已保存');
+          if (isAssetLibraryView(session)) showToast(action === 'delete' ? '结果资产已删除' : action === 'restore' ? '结果资产已恢复' : action === 'favorite' ? (payload.asset?.favorite ? '已收藏结果资产' : '已取消收藏') : '标签已保存');
         } catch (error) {
           if (isAssetLibraryView(session) && button) button.disabled = false;
           if (isAssetLibraryView(session)) showToast(error.message || '结果资产更新失败');
@@ -2455,7 +2494,7 @@
         }
         const assetFilter = event.target.closest('[data-asset-filter]');
         if (!assetFilter || assetFilter.dataset.assetFilter === 'search') return;
-        assetLibraryFilters[assetFilter.dataset.assetFilter] = assetFilter.value;
+        assetLibraryFilters[assetFilter.dataset.assetFilter] = assetFilter.type === 'checkbox' ? (assetFilter.checked ? 'true' : '') : assetFilter.value;
         fetchAssetLibrary();
       });
       modal.addEventListener('cancel', (event) => { event.preventDefault(); closeModal(); });
