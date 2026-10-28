@@ -1063,8 +1063,17 @@ const handleResultAssets = async (req, res) => {
     if (version !== null && (!/^\d+$/.test(version) || Number(version) < 1)) { sendJson(res, 400, { error: 'version must be a positive integer.' }); return; }
     const from = query.get('from') ?? query.get('createdAfter') ?? query.get('createdFrom') ?? query.get('since');
     const to = query.get('to') ?? query.get('createdBefore') ?? query.get('createdTo') ?? query.get('until');
-    const fromMs = from === null ? null : Date.parse(from);
-    const toMs = to === null ? null : Date.parse(to);
+    const parseAssetTimeFilter = (value, endOfDay = false) => {
+      if (value === null) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const day = Date.parse(`${value}T00:00:00.000Z`);
+        if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== value) return NaN;
+        return day + (endOfDay ? 24 * 60 * 60 * 1000 - 1 : 0);
+      }
+      return Date.parse(value);
+    };
+    const fromMs = parseAssetTimeFilter(from);
+    const toMs = parseAssetTimeFilter(to, true);
     if ((fromMs !== null && !Number.isFinite(fromMs)) || (toMs !== null && !Number.isFinite(toMs)) || (fromMs !== null && toMs !== null && fromMs > toMs)) {
       sendJson(res, 400, { error: 'Invalid result asset time range.' }); return;
     }
