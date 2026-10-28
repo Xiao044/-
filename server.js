@@ -3,6 +3,7 @@ const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 const {
   ERROR_CODES: AGENT_ERROR_CODES,
   applyUserDraftEdits,
@@ -223,6 +224,34 @@ const writeProjectStore = (store) => {
 };
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value));
+const diffVersionSnapshots = (before, after) => {
+  const changes = [];
+  const visit = (left, right, currentPath) => {
+    if (isDeepStrictEqual(left, right)) return;
+    const leftIsArray = Array.isArray(left);
+    const rightIsArray = Array.isArray(right);
+    if (leftIsArray || rightIsArray) {
+      const change = { path: currentPath, type: left === undefined ? 'added' : right === undefined ? 'removed' : 'changed' };
+      if (left !== undefined) change.before = cloneJson(left);
+      if (right !== undefined) change.after = cloneJson(right);
+      changes.push(change);
+      return;
+    }
+    const leftIsObject = isPlainObject(left);
+    const rightIsObject = isPlainObject(right);
+    if (leftIsObject && rightIsObject) {
+      const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+      keys.forEach((key) => visit(left[key], right[key], currentPath ? `${currentPath}.${key}` : key));
+      return;
+    }
+    const change = { path: currentPath, type: left === undefined ? 'added' : right === undefined ? 'removed' : 'changed' };
+    if (left !== undefined) change.before = cloneJson(left);
+    if (right !== undefined) change.after = cloneJson(right);
+    changes.push(change);
+  };
+  visit(before, after, '');
+  return changes;
+};
 const readFileState = (filePath) => ({
   exists: fs.existsSync(filePath),
   bytes: fs.existsSync(filePath) ? fs.readFileSync(filePath) : null
@@ -452,13 +481,15 @@ const handleProject = async (req, res) => {
 };
 
 const projectVersionCollectionMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions(?:\?.*)?$/);
+const projectVersionDiffMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions\/([^/?]+)\/diff(?:\?.*)?$/);
 const projectVersionRestoreMatch = (req) => req.url.match(/^\/api\/projects\/([^/?]+)\/versions\/([^/?]+)\/restore(?:\?.*)?$/);
 let projectVersionsMutationTail = Promise.resolve();
 
 const handleProjectVersionsUnsafe = async (req, res) => {
   const collectionMatch = projectVersionCollectionMatch(req);
+  const diffMatch = projectVersionDiffMatch(req);
   const restoreMatch = projectVersionRestoreMatch(req);
-  const encodedProjectId = collectionMatch?.[1] || restoreMatch?.[1] || '';
+  const encodedProjectId = collectionMatch?.[1] || diffMatch?.[1] || restoreMatch?.[1] || '';
   const projectId = decodeRoutePart(encodedProjectId);
   if (!projectId || !isValidProjectId(projectId)) {
     sendJson(res, 400, { error: 'Invalid project id.' });
@@ -474,6 +505,39 @@ const handleProjectVersionsUnsafe = async (req, res) => {
   const projectVersions = Array.isArray(versionsStore[projectId]) ? versionsStore[projectId] : [];
   if (collectionMatch && req.method === 'GET') {
     sendJson(res, 200, { projectId, versions: projectVersions.map((version) => cloneJson(version)) });
+    return;
+  }
+
+  if (diffMatch && req.method === 'GET') {
+    const versionId = decodeRoutePart(diffMatch[2]);
+    if (!versionId || !isValidVersionId(versionId)) {
+      sendJson(res, 400, { error: 'Invalid version id.' });
+      return;
+    }
+    const against = new URL(req.url, 'http://localhost').searchParams.get('against');
+    if (!against) {
+      sendJson(res, 400, { error: 'The against version id is required.' });
+      return;
+    }
+    const againstVersionId = decodeRoutePart(against);
+    if (!againstVersionId || !isValidVersionId(againstVersionId)) {
+      sendJson(res, 400, { error: 'Invalid against version id.' });
+      return;
+    }
+    const version = projectVersions.find((item) => item.versionId === versionId);
+    const againstVersion = projectVersions.find((item) => item.versionId === againstVersionId);
+    if (!version || !againstVersion || !version.snapshot || !againstVersion.snapshot || Array.isArray(version.snapshot) || Array.isArray(againstVersion.snapshot)) {
+      sendJson(res, 404, { error: 'Version not found.' });
+      return;
+    }
+    const changes = diffVersionSnapshots(againstVersion.snapshot, version.snapshot);
+    sendJson(res, 200, {
+      projectId,
+      versionId,
+      againstVersionId,
+      equal: changes.length === 0,
+      changes
+    });
     return;
   }
 
@@ -1556,7 +1620,7 @@ const server = http.createServer(async (req, res) => {
     await run;
     return;
   }
-  if (/^\/api\/projects\/[^/?]+\/versions(?:\/[^/?]+\/restore)?(?:\?.*)?$/.test(req.url)) { await handleProjectVersions(req, res); return; }
+  if (/^\/api\/projects\/[^/?]+\/versions(?:\/[^/?]+\/(?:diff|restore))?(?:\?.*)?$/.test(req.url)) { await handleProjectVersions(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets/.test(req.url)) { await handleAssetUpload(req, res); return; }
   if ((req.method === 'GET' || req.method === 'PUT') && /^\/api\/projects\//.test(req.url)) { await handleProject(req, res); return; }
   if (req.method === 'GET') { serveStatic(req, res); return; }

@@ -122,6 +122,53 @@ test('project versions reject malformed input and isolate project ids', async (t
   assert.equal((await json(server.base, '/api/projects/one/versions/not-a-version/restore', { method: 'POST' })).status, 400);
 });
 
+test('version diff reports recursive changed, added, removed, and whole-array fields without mutating snapshots', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-project-version-diff-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, dataDir);
+  await json(server.base, '/api/projects/diff-project', { method: 'PUT', body: JSON.stringify(project('diff-project')) });
+  const beforeSnapshot = { ...project('diff-project'), promptB: 'before', nested: { kept: 'same', removed: 'gone' }, list: ['before', 'item'] };
+  const afterSnapshot = { ...project('diff-project'), promptB: 'after', nested: { kept: 'same', added: 'new' }, list: ['after'] };
+  const beforeResponse = await json(server.base, '/api/projects/diff-project/versions', { method: 'POST', body: JSON.stringify({ snapshot: beforeSnapshot }) });
+  const beforeVersion = (await beforeResponse.json()).version;
+  const afterResponse = await json(server.base, '/api/projects/diff-project/versions', { method: 'POST', body: JSON.stringify({ snapshot: afterSnapshot }) });
+  const afterVersion = (await afterResponse.json()).version;
+  const versionsPath = path.join(dataDir, 'project-versions.json');
+  const beforeBytes = fs.readFileSync(versionsPath);
+
+  const diffResponse = await json(server.base, `/api/projects/diff-project/versions/${encodeURIComponent(afterVersion.versionId)}/diff?against=${encodeURIComponent(beforeVersion.versionId)}`);
+  assert.equal(diffResponse.status, 200);
+  const diff = await diffResponse.json();
+  assert.equal(diff.equal, false);
+  assert.deepEqual(diff.changes.map(({ path: fieldPath, type }) => ({ path: fieldPath, type })), [
+    { path: 'list', type: 'changed' },
+    { path: 'nested.added', type: 'added' },
+    { path: 'nested.removed', type: 'removed' },
+    { path: 'promptB', type: 'changed' }
+  ]);
+  assert.deepEqual(diff.changes.find((change) => change.path === 'list'), { path: 'list', type: 'changed', before: ['before', 'item'], after: ['after'] });
+  assert.deepEqual((await (await json(server.base, `/api/projects/diff-project/versions/${encodeURIComponent(afterVersion.versionId)}/diff?against=${encodeURIComponent(afterVersion.versionId)}`)).json()).changes, []);
+  assert.deepEqual(fs.readFileSync(versionsPath), beforeBytes);
+  const stored = await (await json(server.base, '/api/projects/diff-project/versions')).json();
+  assert.equal(stored.versions.find((version) => version.versionId === beforeVersion.versionId).snapshot.nested.removed, 'gone');
+});
+
+test('version diff rejects invalid and cross-project comparison ids', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-project-version-diff-invalid-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const server = await startServer(t, dataDir);
+  await json(server.base, '/api/projects/diff-one', { method: 'PUT', body: JSON.stringify(project('diff-one')) });
+  await json(server.base, '/api/projects/diff-two', { method: 'PUT', body: JSON.stringify(project('diff-two')) });
+  const one = await json(server.base, '/api/projects/diff-one/versions', { method: 'POST', body: JSON.stringify({ snapshot: project('diff-one') }) });
+  const oneVersionId = (await one.json()).version.versionId;
+  const two = await json(server.base, '/api/projects/diff-two/versions', { method: 'POST', body: JSON.stringify({ snapshot: project('diff-two') }) });
+  const twoVersionId = (await two.json()).version.versionId;
+  assert.equal((await json(server.base, `/api/projects/diff-one/versions/${encodeURIComponent(oneVersionId)}/diff`)).status, 400);
+  assert.equal((await json(server.base, `/api/projects/diff-one/versions/not-a-version/diff?against=${encodeURIComponent(oneVersionId)}`)).status, 400);
+  assert.equal((await json(server.base, `/api/projects/diff-one/versions/${encodeURIComponent(oneVersionId)}/diff?against=not-a-version`)).status, 400);
+  assert.equal((await json(server.base, `/api/projects/diff-one/versions/${encodeURIComponent(oneVersionId)}/diff?against=${encodeURIComponent(twoVersionId)}`)).status, 404);
+});
+
 test('malformed percent encoded version route parts return 400 without crashing', async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-project-versions-encoding-'));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
@@ -141,4 +188,10 @@ test('version history frontend uses server versions and restore endpoint', () =>
   assert.match(source, /localStorage\.setItem\(storageKey, JSON\.stringify\(\{ ...restoredProject/);
   assert.doesNotMatch(source, /window\.localStorage\.removeItem\(storageKey\)/);
   assert.doesNotMatch(source, /window\.localStorage\.setItem\(storageKey, JSON\.stringify\(\{ \.\.\.version,/);
+  assert.match(source, /\/versions\/\$\{encodeURIComponent\(record\.versionId\)\}\/diff\?against=/);
+  assert.match(source, /textarea[^>]+readonly/);
+  assert.match(source, /data-version-compare/);
+  assert.match(source, /candidate\.versionId && !candidate\.versionId\.startsWith\('local-'\)/);
+  assert.match(source, /restoredFromVersionId/);
+  assert.match(source, /escapeHtml\(versionLabel\(record\)\)/);
 });

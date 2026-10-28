@@ -301,6 +301,10 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
 .version-list span { overflow: hidden; color: #969181; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .version-list .text-button { flex-shrink: 0; color: #847239; }
 .version-list .empty-version { display: block; color: #969181; font-size: 12px; }
+.version-list-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.version-history-layout { grid-template-columns: minmax(240px, .82fr) minmax(0, 1.18fr); }
+.version-compare-controls { display: flex; align-items: center; gap: 8px; }
+.version-compare-controls select { min-width: 0; flex: 1; padding: 7px 9px; border: 1px solid #e6dfcd; border-radius: 6px; background: #fffef9; color: #746d59; font: inherit; font-size: 11px; }
 .agent-history-toolbar { display: flex; justify-content: flex-end; padding: 0 23px 4px; background: #fdf9e8; }
 .agent-heading-actions { display: flex; align-items: center; gap: 10px; }
 .agent-history-trigger { min-height: 30px; padding: 0 6px; white-space: nowrap; }
