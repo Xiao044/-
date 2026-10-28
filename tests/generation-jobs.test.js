@@ -214,6 +214,38 @@ test('task center frontend exposes filters, attempt history, and snapshot-based 
   assert.doesNotMatch(source, /retryImageUrl = aReferenceImageUrl \|\| productState\.imageUrl/);
 });
 
+
+test('result asset library frontend exposes server filters and asset mutations', () => {
+  const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(source, /data-open-asset-library/);
+  assert.match(source, /data-asset-filter="search"/);
+  assert.match(source, /data-asset-filter="status"/);
+  assert.match(source, /data-asset-filter="platform"/);
+  assert.match(source, /data-asset-filter="favorite"/);
+  assert.match(source, /data-asset-filter="tag"/);
+  assert.match(source, /data-asset-filter="promptVersion"/);
+  assert.match(source, /result-assets\$\{requested\.query/);
+  assert.match(source, /method: 'PATCH'/);
+  assert.match(source, /favorite: !asset\.favorite/);
+  assert.match(source, /tags: String\(modalBody\.querySelector/);
+  assert.match(source, /method: 'DELETE'/);
+  assert.match(source, /window\.confirm\('删除后结果资产会移入回收状态/);
+  assert.match(source, /thumbnailUrl \|\| asset\.archivedUrl \|\| asset\.url/);
+  assert.match(source, /assetLibraryLoading/);
+  assert.match(source, /结果资产读取失败/);
+  assert.match(source, /没有匹配的结果资产/);
+  assert.match(source, /data-asset-action="refresh"/);
+  assert.match(source, /Number\(rawVersion\) < 1/);
+  assert.match(source, /test\(rawVersion\)/);
+  assert.match(source, /提示词版本必须是正整数/);
+  assert.match(source, /assetLibraryState\('结果资产读取失败'/);
+  assert.match(source, /modalSession/);
+  assert.match(source, /assetLibraryRequestId/);
+  assert.match(source, /isAssetLibraryView\(session\)/);
+  assert.match(source, /await fetchAssetLibrary\(\{ session \}\)/);
+});
+
+
 test('generation attempts reject stale PATCH and result writes', async (t) => {
   const { base } = await startServer(t);
   const created = await json(base, '/api/projects/demo/generation-jobs', {
