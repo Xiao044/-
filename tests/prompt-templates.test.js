@@ -7,6 +7,8 @@ const path = require('node:path');
 const net = require('node:net');
 
 const root = path.resolve(__dirname, '..');
+const indexSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const stylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
 const serverPath = path.join(root, 'server.js');
 const getPort = () => new Promise((resolve, reject) => {
   const probe = net.createServer();
@@ -40,6 +42,45 @@ const json = (base, url, options = {}) => fetch(`${base}${url}`, {
   headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options
 });
 const createProject = (base, projectId) => json(base, `/api/projects/${projectId}`, { method: 'PUT', body: JSON.stringify({ projectName: projectId }) });
+
+test('prompt template project tool exposes escaped cards, CRUD actions, and A/B apply flows', () => {
+  assert.match(indexSource, /data-open-prompt-templates/);
+  assert.match(indexSource, /fetch\(`\$\{projectApiUrl\}\/templates`/);
+  assert.match(indexSource, /data-template-action="save-current-a"/);
+  assert.match(indexSource, /data-template-action="save-current-b"/);
+  assert.match(indexSource, /method: 'PATCH'[\s\S]{0,180}enabled: !template\.enabled/);
+  assert.match(indexSource, /'\/duplicate'/);
+  assert.match(indexSource, /escapeHtml\(template\.name\)/);
+  assert.match(indexSource, /escapeHtml\(templatePreviewText\(template\)/);
+  assert.match(indexSource, /templateApplyPreviewMarkup/);
+  assert.match(indexSource, /提示词 B 已修改。当前生成结果将失效/);
+  assert.match(indexSource, /JSON\.stringify\(proposed\.platformOverrides\) !== JSON\.stringify\(platformOverrides\)/);
+  assert.match(indexSource, /const readBExecutionFields = \(\) =>/);
+  assert.match(indexSource, /platformOverrides: nextPlatformOverrides/);
+  assert.match(indexSource, /JSON\.stringify\(bFields\.platformOverrides\) !== JSON\.stringify\(bPlatformOverridesBaseline\(\)\)/);
+  assert.match(indexSource, /const clearPromptBTemplateProvenance = \(\) =>/);
+  assert.match(indexSource, /if \(platformOverridesDirty\) clearPromptBTemplateProvenance\(\)/);
+  assert.match(indexSource, /平台覆盖参数已修改。当前生成结果将失效/);
+  assert.match(indexSource, /resetDownstream\(3\)/);
+  assert.match(indexSource, /setStatus\('可在所选平台生成', 'is-ready'\)/);
+  assert.match(indexSource, /source: 'user'/);
+  assert.match(indexSource, /promptBSource = `template:\$\{template\.templateId\}@v/);
+  assert.match(indexSource, /promptBTemplateId/);
+  assert.match(indexSource, /promptBTemplateVersion/);
+  assert.match(indexSource, /agentTemplateId/);
+  assert.match(indexSource, /agentTemplateVersion/);
+  assert.match(indexSource, /templateVersion: promptBTemplateVersion/);
+  assert.match(indexSource, /await syncProject\(\)/);
+  assert.doesNotMatch(indexSource, /serverSyncBusy/);
+  assert.match(indexSource, /let serverSyncQueue = null/);
+  assert.match(indexSource, /let pendingProjectSync = null/);
+  assert.match(indexSource, /JSON\.stringify\(serializeProject\(\)\)/);
+  assert.match(indexSource, /while \(pendingProjectSync\)/);
+  assert.match(indexSource, /return serverSyncQueue/);
+  assert.match(stylesSource, /\.template-grid/);
+  assert.match(stylesSource, /\.template-card/);
+  assert.match(stylesSource, /\.template-apply-preview/);
+});
 
 test('prompt templates CRUD validates ownership, fields, enablement, and version increments', async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-prompt-templates-'));

@@ -71,7 +71,7 @@
       <div class="page-content">
         <section class="welcome-row" id="project">
           <div><div class="page-kicker"><svg class="ui-icon"><use href="#i-sun"/></svg>一点灵感，慢慢成像</div><h1>商品图工作台<span class="title-period">.</span></h1><p class="page-description">把商品信息变成创作方向，让每一步都有迹可循。</p></div>
-          <div class="project-tools"><button class="button button-secondary" type="button" data-open-task-center><svg class="ui-icon"><use href="#i-grid"/></svg>任务中心</button><button class="button button-secondary" type="button" data-open-asset-library><svg class="ui-icon"><use href="#i-image"/></svg>结果资产库</button><button class="button button-secondary" type="button" data-open-version-history><svg class="ui-icon"><use href="#i-clock"/></svg>版本记录</button><button class="button button-secondary project-data-action" type="button" data-project-action="export"><svg class="ui-icon"><use href="#i-external"/></svg>导出项目</button><button class="button button-secondary project-data-action" type="button" data-project-action="import"><svg class="ui-icon"><use href="#i-folder"/></svg>导入项目</button><input class="project-import-input" id="project-import-input" type="file" accept="application/json,.json" aria-label="选择项目 JSON 文件"><button class="button button-primary" type="button"><svg class="ui-icon"><use href="#i-save"/></svg>保存项目</button></div>
+          <div class="project-tools"><button class="button button-secondary" type="button" data-open-task-center><svg class="ui-icon"><use href="#i-grid"/></svg>任务中心</button><button class="button button-secondary" type="button" data-open-asset-library><svg class="ui-icon"><use href="#i-image"/></svg>结果资产库</button><button class="button button-secondary" type="button" data-open-version-history><svg class="ui-icon"><use href="#i-clock"/></svg>版本记录</button><button class="button button-secondary" type="button" data-open-prompt-templates><svg class="ui-icon"><use href="#i-bookmark"/></svg>提示词模板</button><button class="button button-secondary project-data-action" type="button" data-project-action="export"><svg class="ui-icon"><use href="#i-external"/></svg>导出项目</button><button class="button button-secondary project-data-action" type="button" data-project-action="import"><svg class="ui-icon"><use href="#i-folder"/></svg>导入项目</button><input class="project-import-input" id="project-import-input" type="file" accept="application/json,.json" aria-label="选择项目 JSON 文件"><button class="button button-primary" type="button"><svg class="ui-icon"><use href="#i-save"/></svg>保存项目</button></div>
         </section>
         <section class="workflow-panel" id="workflow" aria-labelledby="workflow-title">
           <div class="workflow-heading"><div><h2 id="workflow-title">创作流程</h2><span class="workflow-caption">一步一步，让想法更清晰</span></div><span class="workflow-hint"><svg class="ui-icon"><use href="#i-pause"/></svg>已完成步骤可点击回退</span></div>
@@ -220,6 +220,12 @@
       let platformOverrides = {};
       let promptBSource = 'workbench';
       let promptBVersion = 1;
+      let promptBTemplateId = '';
+      let promptBTemplateVersion = 0;
+      let agentTemplateId = '';
+      let agentTemplateVersion = 0;
+      let platformOverridesBeforeEdit = null;
+      let platformOverridesDirty = false;
       const allowedAspectRatios = ['1:1', '4:5', '3:4', '9:16', '16:9'];
       const maxPlatformParams = 30;
       const validatePlatformParams = (value) => {
@@ -290,7 +296,8 @@
       let agentNote = '';
       let agentBusy = false;
       let serverUpdatedAt = '';
-      let serverSyncBusy = false;
+      let serverSyncQueue = null;
+      let pendingProjectSync = null;
       let selectedGenerationPlatforms = new Set(['doubao']);
 
       // The starter project includes a visual placeholder. It is not an uploaded
@@ -309,6 +316,18 @@
         const serverIds = new Set(server.map((record) => record?.versionId).filter(Boolean));
         const localOnly = local.filter((record) => !record?.versionId || !serverIds.has(record.versionId));
         return [...server, ...localOnly];
+      };
+      const clonePlatformOverrides = (value) => {
+        try { return JSON.parse(JSON.stringify(value && typeof value === 'object' ? value : {})); } catch { return {}; }
+      };
+      const commitPlatformOverrides = () => {
+        platformOverridesBeforeEdit = clonePlatformOverrides(platformOverrides);
+        platformOverridesDirty = false;
+      };
+      const clearPromptBTemplateProvenance = () => {
+        promptBTemplateId = '';
+        promptBTemplateVersion = 0;
+        if (String(promptBSource || '').startsWith('template:')) promptBSource = 'workbench';
       };
 
       const persistState = () => {
@@ -334,6 +353,10 @@
             platformOverrides,
             promptBSource,
             promptBVersion,
+            promptBTemplateId,
+            promptBTemplateVersion,
+            agentTemplateId,
+            agentTemplateVersion,
             resultGenerated,
             resultSelected,
             generatedResults: persistedResults(),
@@ -358,9 +381,9 @@
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
           projectId, selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
-          descriptionA, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, resultGenerated, resultSelected, product: productState, versions,
+          descriptionA, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
-          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion },
+          promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion },
           descriptionAStructured,
           agentWarnings,
           descriptionADraft,
@@ -378,18 +401,28 @@
           updatedAt: new Date().toISOString()
         };
       };
-      const syncProject = async (showFeedback = false) => {
-        if (serverSyncBusy) return;
-        serverSyncBusy = true;
-        try {
-          const response = await fetch(projectApiUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serializeProject()) });
-          if (!response.ok) throw new Error('sync failed');
-          const payload = await response.json();
-          serverUpdatedAt = payload.project?.updatedAt || serverUpdatedAt;
-          if (showFeedback) showToast('项目已同步到服务端');
-        } catch (error) {
-          if (showFeedback) showToast('服务端暂不可用，已保存在本地');
-        } finally { serverSyncBusy = false; }
+      const syncProject = (showFeedback = false) => {
+        const nextRequest = { routeUrl: projectApiUrl, body: JSON.stringify(serializeProject()), showFeedback: Boolean(showFeedback) };
+        pendingProjectSync = pendingProjectSync
+          ? { ...nextRequest, showFeedback: pendingProjectSync.showFeedback || nextRequest.showFeedback }
+          : nextRequest;
+        if (serverSyncQueue) return serverSyncQueue;
+        serverSyncQueue = (async () => {
+          while (pendingProjectSync) {
+            const request = pendingProjectSync;
+            pendingProjectSync = null;
+            try {
+              const response = await fetch(request.routeUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: request.body });
+              if (!response.ok) throw new Error('sync failed');
+              const payload = await response.json();
+              serverUpdatedAt = payload.project?.updatedAt || serverUpdatedAt;
+              if (request.showFeedback) showToast('项目已同步到服务端');
+            } catch (error) {
+              if (request.showFeedback) showToast('服务端暂不可用，已保存在本地');
+            }
+          }
+        })().finally(() => { serverSyncQueue = null; });
+        return serverSyncQueue;
       };
       const ensureProjectOnServer = async () => {
         const current = await fetch(projectApiUrl, { cache: 'no-store' });
@@ -802,6 +835,8 @@
           agentWarnings = Array.isArray(payload.warnings) ? payload.warnings : [];
           descriptionADraft = payload.draft && typeof payload.draft === 'object' ? payload.draft : null;
           descriptionAFieldEdits = {};
+          agentTemplateId = '';
+          agentTemplateVersion = 0;
           currentAgentRunId = payload.run?.runId || currentAgentRunId;
           currentAgentRunVersion = Number(payload.run?.version) || currentAgentRunVersion;
           generated = true;
@@ -1009,6 +1044,175 @@
         selectedVersionDiff = payload;
         renderVersionHistory({ open: false });
       };
+      let promptTemplates = [];
+      let templateSaveKind = '';
+      let templateApplyCandidate = null;
+      let templateRequestId = 0;
+      const templateKindLabels = { category: '品类', scene: '场景', composition: '构图', negative: '负面约束' };
+      const templateKindLabel = (kind) => templateKindLabels[kind] || kind || '未分类';
+      const templateValue = (value) => value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'value') ? value.value : value;
+      const templateJson = (value) => JSON.stringify(value ?? {}, null, 2);
+      const templatePreviewText = (template) => {
+        const content = typeof template?.content === 'string' ? template.content : '';
+        if (content) return content;
+        const fields = template?.fields && typeof template.fields === 'object' ? template.fields : {};
+        return Object.entries(fields).map(([key, value]) => `${key}: ${typeof templateValue(value) === 'string' ? templateValue(value) : JSON.stringify(templateValue(value))}`).join(' · ');
+      };
+      const templateCardMarkup = (template) => `<article class="template-card"><header class="template-card-header"><div><span class="template-kind">${escapeHtml(templateKindLabel(template.kind))}</span><h3>${escapeHtml(template.name)}</h3></div><span class="template-enabled${template.enabled ? '' : ' is-disabled'}">${template.enabled ? '已启用' : '已停用'}</span></header><dl class="template-card-meta"><div><dt>版本</dt><dd>v${escapeHtml(String(template.version || 1))}</dd></div><div><dt>来源</dt><dd>${escapeHtml(template.source || 'manual')}</dd></div></dl><p class="template-card-preview">${escapeHtml(templatePreviewText(template) || template.description || '暂无内容')}</p><footer class="template-card-actions"><button class="text-button" type="button" data-template-action="apply" data-template-id="${escapeHtml(template.templateId)}"${template.enabled ? '' : ' disabled'}>应用</button><button class="text-button" type="button" data-template-action="duplicate" data-template-id="${escapeHtml(template.templateId)}">复制</button><button class="text-button" type="button" data-template-action="toggle" data-template-id="${escapeHtml(template.templateId)}">${template.enabled ? '停用' : '启用'}</button></footer></article>`;
+      const promptTemplatesMarkup = (notice = '') => {
+        const cards = promptTemplates.length ? promptTemplates.map(templateCardMarkup).join('') : '<div class="template-empty"><strong>还没有提示词模板</strong><span>保存当前 A 或 B 版本后，这里会出现可复用的模板。</span></div>';
+        return `<div class="template-toolbar"><div><p class="modal-note">模板保存在当前项目中，可重复应用到描述词 A 或提示词 B。</p></div><div class="template-toolbar-actions"><button class="button button-secondary" type="button" data-template-action="save-current-a"${descriptionA ? '' : ' disabled'}>保存当前 A</button><button class="button button-primary" type="button" data-template-action="save-current-b"${promptB ? '' : ' disabled'}>保存当前 B</button></div></div>${notice ? `<p class="template-notice">${escapeHtml(notice)}</p>` : ''}<div class="template-grid">${cards}</div>`;
+      };
+      const isTemplateView = (session) => modal.dataset.modalSession === String(session) && modalTitle.textContent === '提示词模板';
+      const fetchPromptTemplates = async ({ session = modalSession } = {}) => {
+        const request = ++templateRequestId;
+        try {
+          const response = await fetch(`${projectApiUrl}/templates`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (request !== templateRequestId || !isTemplateView(session)) return;
+          if (!response.ok) throw new Error(payload.error || '模板读取失败');
+          promptTemplates = Array.isArray(payload.templates) ? payload.templates : [];
+          modalBody.innerHTML = promptTemplatesMarkup();
+        } catch (error) {
+          if (request !== templateRequestId || !isTemplateView(session)) return;
+          modalBody.innerHTML = promptTemplatesMarkup(error.message || '模板读取失败');
+        }
+      };
+      const openPromptTemplates = () => {
+        promptTemplates = [];
+        openModal('提示词模板', promptTemplatesMarkup('正在读取当前项目模板…'), { wide: true });
+        fetchPromptTemplates({ session: modalSession });
+      };
+      const templateSaveSource = (kind) => kind === 'a'
+        ? { kind: 'category', name: `${productState.name || '当前项目'} · 描述词 A`, content: descriptionA, fields: descriptionAStructured, source: 'workbench', sourceVersionId: currentAgentRunId || '' }
+        : { kind: 'composition', name: `${productState.name || '当前项目'} · 提示词 B`, content: promptB, fields: { positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, source: promptBSource, version: promptBVersion }, source: 'workbench', sourceVersionId: `prompt-b-${promptBVersion}` };
+      const openTemplateSave = (kind) => {
+        templateSaveKind = kind;
+        const draft = templateSaveSource(kind);
+        const content = typeof draft.content === 'string' ? draft.content : '';
+        openModal(`保存当前${kind === 'a' ? ' A' : ' B'}为模板`, `<p class="modal-note">保存后可在当前项目的提示词模板中重复使用。</p><label class="modal-field">模板名称<input id="template-name" value="${escapeHtml(draft.name)}" maxlength="120"></label><label class="modal-field">模板类型<select id="template-kind"><option value="category"${draft.kind === 'category' ? ' selected' : ''}>品类</option><option value="scene">场景</option><option value="composition"${draft.kind === 'composition' ? ' selected' : ''}>构图</option><option value="negative">负面约束</option></select></label><label class="modal-field">说明（可选）<input id="template-description" placeholder="补充这份模板的使用场景"></label><label class="modal-field">内容预览<textarea id="template-content" readonly>${escapeHtml(content)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-template">保存模板</button></div>`);
+      };
+      const savePromptTemplate = async () => {
+        const draft = templateSaveSource(templateSaveKind);
+        const name = modalBody.querySelector('#template-name')?.value.trim() || draft.name;
+        const payload = { ...draft, kind: modalBody.querySelector('#template-kind')?.value || draft.kind, name, description: modalBody.querySelector('#template-description')?.value.trim() || undefined };
+        if (!payload.content) { showToast(`当前${templateSaveKind === 'a' ? ' A' : ' B'}还没有可保存的内容`); return; }
+        if (!payload.sourceVersionId) delete payload.sourceVersionId;
+        if (!payload.description) delete payload.description;
+        try {
+          const response = await fetch(`${projectApiUrl}/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || '模板保存失败');
+          promptTemplates = Array.isArray(result.templates) ? result.templates : [result.template, ...promptTemplates];
+          closeModal();
+          showToast('模板已保存');
+        } catch (error) { showToast(error.message || '模板保存失败'); }
+      };
+      const templateApplyFields = (template) => {
+        const fields = template?.fields && typeof template.fields === 'object' ? template.fields : {};
+        const content = typeof template?.content === 'string' ? template.content : '';
+        return template.kind === 'composition' || Object.prototype.hasOwnProperty.call(fields, 'positivePrompt') || Object.prototype.hasOwnProperty.call(fields, 'aspectRatio')
+          ? { mode: 'b', positivePrompt: String(templateValue(fields.positivePrompt) || content || ''), negativePrompt: String(templateValue(fields.negativePrompt) || ''), aspectRatio: String(templateValue(fields.aspectRatio) || '4:5'), platformParams: templateValue(fields.platformParams) && typeof templateValue(fields.platformParams) === 'object' ? templateValue(fields.platformParams) : {}, platformOverrides: templateValue(fields.platformOverrides) && typeof templateValue(fields.platformOverrides) === 'object' ? templateValue(fields.platformOverrides) : {} }
+          : { mode: 'a', descriptionA: content, fields };
+      };
+      const templateApplyPreviewMarkup = (template) => {
+        const proposed = templateApplyFields(template);
+        const fieldMarkup = proposed.mode === 'b'
+          ? [['正向提示词 B', proposed.positivePrompt], ['负面提示词', proposed.negativePrompt], ['画幅', proposed.aspectRatio], ['平台参数', templateJson(proposed.platformParams)], ['平台覆盖参数', templateJson(proposed.platformOverrides)]]
+            .map(([label, value]) => `<section class="template-preview-field"><h4>${escapeHtml(label)}</h4><pre>${escapeHtml(value)}</pre></section>`).join('')
+          : [['描述词 A', proposed.descriptionA], ...Object.entries(proposed.fields).map(([key, value]) => [key, templateValue(value)])]
+            .map(([label, value]) => `<section class="template-preview-field"><h4>${escapeHtml(label)}</h4><pre>${escapeHtml(typeof value === 'string' ? value : JSON.stringify(value ?? '', null, 2))}</pre></section>`).join('');
+        return `<p class="modal-note">确认后会把模板内容写入当前项目的${proposed.mode === 'a' ? '描述词 A' : '提示词 B'}。</p><div class="template-apply-preview"><header><span class="template-kind">${escapeHtml(templateKindLabel(template.kind))}</span><strong>${escapeHtml(template.name)}</strong><span>v${escapeHtml(String(template.version || 1))} · ${escapeHtml(template.source || 'manual')}</span></header>${fieldMarkup}</div><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="apply-template">确认应用</button></div>`;
+      };
+      const openTemplateApplyPreview = (template) => {
+        templateApplyCandidate = template;
+        openModal('应用提示词模板', templateApplyPreviewMarkup(template), { wide: true });
+      };
+      const applyPromptTemplate = async () => {
+        const template = templateApplyCandidate;
+        if (!template) return;
+        const proposed = templateApplyFields(template);
+        if (proposed.mode === 'b') {
+          if (progress < 3) { showToast('请先确认描述词 A，再应用提示词 B 模板'); return; }
+          const changed = Boolean(promptB && (proposed.positivePrompt !== promptB || proposed.negativePrompt !== negativePrompt || proposed.aspectRatio !== aspectRatio || JSON.stringify(proposed.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(proposed.platformOverrides) !== JSON.stringify(platformOverrides)));
+          if (changed && progress > 4) {
+            const accepted = window.confirm('提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
+            if (!accepted) return;
+            resetDownstream(3);
+          }
+          promptB = proposed.positivePrompt;
+          negativePrompt = proposed.negativePrompt;
+          aspectRatio = allowedAspectRatios.includes(proposed.aspectRatio) ? proposed.aspectRatio : '4:5';
+          platformParams = validatePlatformParams(proposed.platformParams).value || {};
+          platformOverrides = validatePlatformOverrides(proposed.platformOverrides).value || {};
+          commitPlatformOverrides();
+          promptBSource = `template:${template.templateId}@v${Math.max(1, Number(template.version) || 1)}`;
+        promptBTemplateId = template.templateId;
+          promptBTemplateVersion = Math.max(1, Number(template.version) || 1);
+          promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
+          progress = Math.max(progress, 4);
+          markStepComplete(3);
+          setCurrentStep(4, '等待生成');
+          unlockCard('c');
+          setStatus('可在所选平台生成', 'is-ready');
+          persistState();
+          await syncProject();
+          closeModal();
+          openDetail('c');
+          showToast('提示词 B 模板已应用');
+          return;
+        }
+        const nextDescription = String(proposed.descriptionA || '').trim();
+        if (!nextDescription) { showToast('A 模板没有可应用的描述词'); return; }
+        const changed = nextDescription !== descriptionA || JSON.stringify(proposed.fields || {}) !== JSON.stringify(descriptionAStructured || {});
+        if (changed && progress > 3) {
+          const accepted = window.confirm('应用 A 模板会清除已确认的提示词 B 和生成结果。是否继续？');
+          if (!accepted) return;
+          resetDownstream(2);
+        }
+        const timestamp = new Date().toISOString();
+        const nextFields = {};
+        for (const definition of agentDraftFieldDefinitions) {
+          const raw = Object.prototype.hasOwnProperty.call(proposed.fields || {}, definition.key) ? proposed.fields[definition.key] : (definition.key === 'productFactsSummary' ? proposed.fields?.subject : undefined);
+          const value = templateValue(raw) ?? (definition.array ? [] : '');
+          nextFields[definition.key] = { value, source: 'user', updatedAt: timestamp, version: Math.max(1, Number(getDraftField(definition.key)?.version) || 1) + 1 };
+        }
+        descriptionA = nextDescription;
+        descriptionAStructured = Object.fromEntries(Object.entries(nextFields).map(([key, field]) => [key, field.value]));
+        descriptionADraft = { schemaVersion: 1, rawText: nextDescription, fields: nextFields, userFacts: descriptionADraft?.userFacts || {} };
+        descriptionAFieldEdits = {};
+        currentAgentRunId = '';
+        currentAgentRunVersion = 0;
+        agentWarnings = [];
+        agentTemplateId = template.templateId;
+        agentTemplateVersion = Math.max(1, Number(template.version) || 1);
+        generated = true;
+        progress = Math.max(progress, 2);
+        markStepComplete(1);
+        setCurrentStep(2, '确认创作简报');
+        unlockCard('a');
+        persistState();
+        await syncProject();
+        closeModal();
+        openDetail('a');
+        showToast('描述词 A 模板已应用，字段已标记为用户修改');
+      };
+      const handleTemplateAction = async (action, templateId) => {
+        if (action === 'save-current-a') { openTemplateSave('a'); return; }
+        if (action === 'save-current-b') { openTemplateSave('b'); return; }
+        const template = promptTemplates.find((item) => item.templateId === templateId);
+        if (!template) return;
+        if (action === 'apply') { openTemplateApplyPreview(template); return; }
+        try {
+          const endpoint = `${projectApiUrl}/templates/${encodeURIComponent(templateId)}${action === 'duplicate' ? '/duplicate' : ''}`;
+          const response = await fetch(endpoint, action === 'toggle' ? { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !template.enabled }) } : { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || '模板操作失败');
+          promptTemplates = Array.isArray(payload.templates) ? payload.templates : promptTemplates;
+          if (isTemplateView(modalSession)) modalBody.innerHTML = promptTemplatesMarkup();
+          showToast(action === 'duplicate' ? '模板已复制' : (template.enabled ? '模板已停用' : '模板已启用'));
+        } catch (error) { showToast(error.message || '模板操作失败'); }
+      };
       const restoreVersion = async (record) => {
         if (!record) return;
         if (record.versionId && !record.versionId.startsWith('local-')) {
@@ -1055,6 +1259,11 @@
         platformOverrides = {};
         promptBSource = 'workbench';
         promptBVersion = 1;
+        promptBTemplateId = '';
+        promptBTemplateVersion = 0;
+        agentTemplateId = '';
+        agentTemplateVersion = 0;
+          commitPlatformOverrides();
         resultGenerated = false;
         resultSelected = -1;
         generatedResults = [];
@@ -1159,8 +1368,8 @@
           document.querySelector('.agent-greeting p').textContent = '商品资料已整理好，再补充一个画面方向，就可以生成第一版描述词。';
           setStatus('等待回答');
         }
-        if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; refreshAgentWarningPanel(); }
-        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; }
+        if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
+        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; promptBTemplateId = ''; promptBTemplateVersion = 0; commitPlatformOverrides(); }
         if (stepIndex < 4) {
           resultGenerated = false;
           resultSelected = -1;
@@ -1201,6 +1410,7 @@
       const renderPlatformOverridesEditor = () => {
         const host = detailContent?.querySelector('#platform-overrides-editor');
         if (!host) return;
+        commitPlatformOverrides();
         const selected = [...selectedGenerationPlatforms];
         host.innerHTML = selected.length
           ? `<div class="platform-overrides-heading"><strong>平台覆盖参数</strong><small>可选。覆盖通用平台参数，值支持字符串、数字和布尔值。</small></div>${selected.map((platform) => `<label class="platform-override-field"><span>${escapeHtml(generationPlatforms[platform]?.label || platform)}</span><textarea data-platform-override="${escapeHtml(platform)}" rows="2" spellcheck="false" placeholder="{}">${escapeHtml(JSON.stringify(platformOverrides[platform] || {}, null, 2))}</textarea></label>`).join('')}`
@@ -2014,14 +2224,17 @@
         const nextNegativePrompt = document.querySelector('#negative-prompt-editor')?.value.trim() || '';
         const nextAspectRatio = document.querySelector('#aspect-ratio-editor')?.value || '';
         const params = parsePlatformParamsEditor(document.querySelector('#platform-params-editor')?.value || '');
+        const overrideEditor = readPlatformOverridesEditor();
+        const nextPlatformOverrides = overrideEditor.errors.length ? clonePlatformOverrides(platformOverrides) : overrideEditor.platformOverrides;
         const validation = validateBExecution({ positivePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {} });
-        return { positivePrompt, negativePrompt: nextNegativePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {}, errors: [...validation.errors, ...(params.ok ? [] : [params.message])] };
+        return { positivePrompt, negativePrompt: nextNegativePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {}, platformOverrides: nextPlatformOverrides, errors: [...validation.errors, ...(params.ok ? [] : [params.message]), ...overrideEditor.errors] };
       };
+      const bPlatformOverridesBaseline = () => platformOverridesDirty && platformOverridesBeforeEdit ? platformOverridesBeforeEdit : platformOverrides;
       const confirmPrompt = () => {
         const bFields = readBExecutionFields();
         const nextPrompt = bFields.positivePrompt;
         if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
-        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams)));
+        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(bFields.platformOverrides) !== JSON.stringify(bPlatformOverridesBaseline())));
         if (changed && progress > 4) {
           const accepted = window.confirm('提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
           if (!accepted) return;
@@ -2031,6 +2244,9 @@
         negativePrompt = bFields.negativePrompt;
         aspectRatio = bFields.aspectRatio;
         platformParams = bFields.platformParams;
+        platformOverrides = bFields.platformOverrides;
+        commitPlatformOverrides();
+        if (changed) clearPromptBTemplateProvenance();
         promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
         progress = Math.max(progress, 4);
         markStepComplete(3);
@@ -2051,7 +2267,7 @@
         const bFields = readBExecutionFields();
         const nextPrompt = bFields.positivePrompt;
         if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
-        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams)));
+        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(bFields.platformOverrides) !== JSON.stringify(bPlatformOverridesBaseline())));
         if (changed && progress > 4) {
           const accepted = window.confirm('重新发送前会清除当前生成结果，但会保留旧任务记录。是否继续？');
           if (!accepted) return;
@@ -2061,6 +2277,9 @@
         negativePrompt = bFields.negativePrompt;
         aspectRatio = bFields.aspectRatio;
         platformParams = bFields.platformParams;
+        platformOverrides = bFields.platformOverrides;
+        commitPlatformOverrides();
+        if (changed) clearPromptBTemplateProvenance();
         promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
         progress = Math.max(progress, 4);
         markStepComplete(3);
@@ -2095,7 +2314,15 @@
         const overrideValidation = readPlatformOverridesEditor();
         if (overrideValidation.errors.length) { showToast(overrideValidation.errors[0]); return; }
         platformParams = executionValidation.platformParams;
+        const overridesChanged = JSON.stringify(overrideValidation.platformOverrides) !== JSON.stringify(bPlatformOverridesBaseline());
+        if (overridesChanged && progress > 4) {
+          const accepted = window.confirm('平台覆盖参数已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
+          if (!accepted) return;
+          resetDownstream(3);
+        }
         platformOverrides = overrideValidation.platformOverrides;
+        if (overridesChanged) clearPromptBTemplateProvenance();
+        commitPlatformOverrides();
         const attemptId = ++doubaoAttemptId;
         if (!generationRequestKey) generationRequestKey = window.crypto?.randomUUID?.() || `generation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
         const platforms = [...selectedGenerationPlatforms];
@@ -2119,7 +2346,7 @@
           const response = await fetch(`${projectApiUrl}/generation-jobs`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Idempotency-Key': generationRequestKey },
-            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, bSnapshot: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion }, ...(imageUrlAbsolute ? { referenceImageUrl: imageUrlAbsolute, productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
+            body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, bSnapshot: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion }, ...(imageUrlAbsolute ? { referenceImageUrl: imageUrlAbsolute, productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
@@ -2374,10 +2601,11 @@
         if (!editor) return;
         const parsed = parsePlatformParamsEditor(editor.value);
         if (!parsed.ok) return;
-        const next = { ...(platformOverrides || {}), [editor.dataset.platformOverride]: parsed.value };
-        const validation = validatePlatformOverrides(next);
+        const validation = validatePlatformOverrides({ ...(platformOverrides || {}), [editor.dataset.platformOverride]: parsed.value });
         if (!validation.ok) return;
         platformOverrides = validation.value;
+        platformOverridesDirty = JSON.stringify(platformOverrides) !== JSON.stringify(platformOverridesBeforeEdit || {});
+        if (platformOverridesDirty) clearPromptBTemplateProvenance();
         persistState();
         syncProject();
       });
@@ -2562,6 +2790,7 @@
       document.querySelector('[data-open-version-history]')?.addEventListener('click', openVersionHistory);
       document.querySelector('[data-open-task-center]')?.addEventListener('click', () => openTaskCenter());
       document.querySelector('[data-open-asset-library]')?.addEventListener('click', () => openAssetLibrary());
+      document.querySelector('[data-open-prompt-templates]')?.addEventListener('click', openPromptTemplates);
       document.querySelector('[data-open-agent-history]')?.addEventListener('click', () => openAgentHistory());
       document.querySelector('[data-project-action="export"]')?.addEventListener('click', exportProject);
       document.querySelector('[data-project-action="import"]')?.addEventListener('click', () => projectImportInput?.click());
@@ -2576,10 +2805,17 @@
         if (runSelection) { selectAgentHistoryRun(runSelection.dataset.agentRunSelect); return; }
         const restoreButton = event.target.closest('[data-agent-run-restore]');
         if (restoreButton) { restoreAgentRun(restoreButton.dataset.agentRunRestore); return; }
+        const templateActionElement = event.target.closest('[data-template-action]');
+        if (templateActionElement) {
+          handleTemplateAction(templateActionElement.dataset.templateAction, templateActionElement.dataset.templateId || '').catch((error) => showToast(error.message || '模板操作失败'));
+          return;
+        }
         const action = event.target.closest('[data-modal-action]')?.dataset.modalAction;
         if (action === 'cancel') closeModal();
         if (action === 'save-product') saveProduct();
         if (action === 'create-project') createProject();
+        if (action === 'save-template') savePromptTemplate();
+        if (action === 'apply-template') applyPromptTemplate().catch((error) => showToast(error.message || '模板应用失败'));
         if (action === 'reload-imported-project') reloadImportedProject();
         const taskActionElement = event.target.closest('[data-task-action]');
         if (taskActionElement) {
@@ -2688,8 +2924,13 @@
           aspectRatio = allowedAspectRatios.includes(saved.aspectRatio || savedB.aspect_ratio) ? (saved.aspectRatio || savedB.aspect_ratio) : '4:5';
           platformParams = saved.platformParams && typeof saved.platformParams === 'object' ? saved.platformParams : (savedB.platform_params && typeof savedB.platform_params === 'object' ? savedB.platform_params : {});
           platformOverrides = saved.platformOverrides && typeof saved.platformOverrides === 'object' ? saved.platformOverrides : (savedB.platform_overrides && typeof savedB.platform_overrides === 'object' ? savedB.platform_overrides : {});
+          commitPlatformOverrides();
           promptBSource = String(saved.promptBSource || savedB.source || 'workbench').slice(0, 80) || 'workbench';
           promptBVersion = Math.max(1, Number(saved.promptBVersion || savedB.version) || 1);
+          promptBTemplateId = String(saved.promptBTemplateId || savedB.templateId || '').slice(0, 160);
+          promptBTemplateVersion = Math.max(0, Number(saved.promptBTemplateVersion || savedB.templateVersion) || 0);
+          agentTemplateId = String(saved.agentTemplateId || '').slice(0, 160);
+          agentTemplateVersion = Math.max(0, Number(saved.agentTemplateVersion) || 0);
           resultGenerated = Boolean(saved.resultGenerated);
           resultSelected = Number.isInteger(saved.resultSelected) ? saved.resultSelected : -1;
           generatedResults = Array.isArray(saved.generatedResults)
