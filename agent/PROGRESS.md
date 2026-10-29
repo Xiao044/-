@@ -40,6 +40,7 @@ Agent 后端核心、项目级运行记录、旧数据迁移、工作台基础�
 - M1 协议切片已完成并推送（`3b02f5b`）：扩展新增统一事件规范化，补齐时间戳、任务/平台/attempt 标识、状态和错误码；标签页移除会通知所有相关工作台并清理旧路由；取消要求匹配 jobId 与 attemptId，断连状态会持久化为失败；重复创建任务使用幂等键且 CORS 允许预检。真实 Chrome/Edge 与四平台矩阵尚未执行。
 - 新增 `tests/extension-adapters.test.js` 的本地 VM/DOM fixture：覆盖协议规范化、四个平台登录检测、提示词发现、提交按钮选择、结果筛选和 jobId/attemptId 取消匹配；使用 Node 内建模块，无第三方依赖。全量测试现为 44/44，通过但不替代真实 Chrome/Edge 或第三方页面验收。
 - M4 模板注册表后端已完成并推送（`6515ab8`）：新增项目级 `prompt-templates.json`、模板 GET/POST/PATCH、启停、版本递增、重复模板、严格字段/类型/深度/长度/归属校验；模板纳入项目导出/导入和跨 store 回滚；全量测试 86/86 通过。
+- M4 模板系统已完成并推送（后端 `6515ab8`、前端 `aca6b23`）：项目级模板注册表支持 category/scene/composition/negative、版本/启停/复制、导出导入；模板 UI 支持列表、保存当前 A/B、启停、复制、应用前预览，A 应用保留 user provenance，B 应用清理旧结果并记录模板 ID/版本；syncProject 已串行化避免模板覆盖竞态。全量测试 87/87 串行和并行通过。
 - M4 项目导出/导入 UI 已完成并推送（`66b8801`）：项目工具支持 JSON 导出下载、JSON 文件选择导入、projectId 校验、显式 replace 确认、缺失上传 warning 展示、异步会话保护和安全文件名；保留结果图片手动导入。全量串行测试 84/84 通过。
 - M4 项目导出/导入已完成并推送（`4a92335`，Agent 导入竞态回归补充提交 `818d055`）：导出包含项目、版本、任务、资产和上传引用清单；导入严格校验 schema、projectId、版本/任务/资产归属、路径、重复 ID、大小和 replace 模式；跨 store 原子回滚、全局 mutation queue、Agent CAS、防 symlink/control 字符和旧数据警告已覆盖。全量测试 82/82 串行和并行通过。
 - M4 版本差异与只读预览已完成并推送（`4dcb2f7`）：新增递归版本 diff API（changed/added/removed/whole-array）、版本预览、对比选择、恢复来源显示和本地版本对比过滤；历史字段全面转义，快照不可变性和跨项目校验有测试。全量测试 68/68 串行和并行通过。
