@@ -482,6 +482,7 @@ const writeGenerationJobs = (jobs) => {
 };
 
 const RESULT_ASSET_STATUSES = new Set(['temp', 'archived', 'invalid', 'deleted']);
+const RESULT_ASSET_QUALITY_LABELS = new Set(['usable', 'discarded', 'subject_complete', 'structure_preserved', 'clear']);
 const normalizeAssetDimensions = (value) => {
   if (!isPlainObject(value)) return null;
   const { width, height } = value;
@@ -499,6 +500,9 @@ const normalizeResultAsset = (asset, projectId, assetId) => {
   const tags = Array.isArray(asset.tags)
     ? [...new Set(asset.tags.map((tag) => String(tag).trim().slice(0, 40)).filter(Boolean))].slice(0, 30)
     : [];
+  const rawQualityLabels = Array.isArray(asset.qualityLabels) ? asset.qualityLabels : [];
+  const qualityLabels = [...new Set(rawQualityLabels.filter((label) => typeof label === 'string' && RESULT_ASSET_QUALITY_LABELS.has(label)))];
+  if (qualityLabels.includes('usable') && qualityLabels.includes('discarded')) qualityLabels.splice(qualityLabels.indexOf('discarded'), 1);
   const status = RESULT_ASSET_STATUSES.has(asset.status) ? asset.status : 'archived';
   const createdAt = String(asset.createdAt || new Date().toISOString()).slice(0, 40);
   const thumbnailUrl = typeof asset.thumbnailUrl === 'string' && (/^https:\/\//.test(asset.thumbnailUrl) || asset.thumbnailUrl.startsWith(`/uploads/${encodeURIComponent(projectId)}/`)) && !asset.thumbnailUrl.includes('..')
@@ -520,6 +524,7 @@ const normalizeResultAsset = (asset, projectId, assetId) => {
     updatedAt: String(asset.updatedAt || createdAt).slice(0, 40),
     archivedAt: typeof asset.archivedAt === 'string' ? asset.archivedAt.slice(0, 40) : (status === 'archived' ? createdAt : null),
     tags,
+    qualityLabels,
     favorite: Boolean(asset.favorite),
     status,
     ...(asset.deletedAt ? { deletedAt: String(asset.deletedAt).slice(0, 40) } : {})
@@ -1695,6 +1700,8 @@ const handleResultAssets = async (req, res) => {
     const jobId = query.get('jobId') ?? query.get('job');
     const attemptId = query.get('attemptId') ?? query.get('attempt');
     const tag = query.get('tag');
+    const qualityLabel = query.get('qualityLabel') ?? query.get('quality');
+    if (qualityLabel && !RESULT_ASSET_QUALITY_LABELS.has(qualityLabel)) { sendJson(res, 400, { error: 'Invalid result asset quality label.' }); return; }
     const assets = Object.values(projectAssets).filter((asset) => {
       if (status ? asset.status !== status : !includeDeleted && asset.status === 'deleted') return false;
       if (platform && asset.platform !== platform) return false;
@@ -1703,6 +1710,7 @@ const handleResultAssets = async (req, res) => {
       if (version !== null && asset.promptVersion !== Number(version)) return false;
       if (favorite !== null && asset.favorite !== (favorite === 'true')) return false;
       if (tag && !asset.tags.includes(tag)) return false;
+      if (qualityLabel && !asset.qualityLabels.includes(qualityLabel)) return false;
       const createdAtMs = Date.parse(asset.createdAt);
       return !(fromMs !== null && createdAtMs < fromMs) && !(toMs !== null && createdAtMs > toMs);
     }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -1719,9 +1727,18 @@ const handleResultAssets = async (req, res) => {
     if (hasOwn(input, 'tags') && (!Array.isArray(input.tags) || input.tags.length > 30 || input.tags.some((tag) => typeof tag !== 'string' || tag.trim().length > 40))) {
       sendJson(res, 400, { error: 'tags must be an array of at most 30 strings of at most 40 characters.' }); return;
     }
+    if (hasOwn(input, 'qualityLabels')) {
+      if (!Array.isArray(input.qualityLabels) || input.qualityLabels.length > RESULT_ASSET_QUALITY_LABELS.size || input.qualityLabels.some((label) => typeof label !== 'string' || !RESULT_ASSET_QUALITY_LABELS.has(label)) || new Set(input.qualityLabels).size !== input.qualityLabels.length) {
+        sendJson(res, 400, { error: 'qualityLabels must contain only allowed quality labels without duplicates.' }); return;
+      }
+      if (input.qualityLabels.includes('usable') && input.qualityLabels.includes('discarded')) {
+        sendJson(res, 400, { error: 'usable and discarded quality labels are mutually exclusive.' }); return;
+      }
+    }
     if (hasOwn(input, 'favorite') && typeof input.favorite !== 'boolean') { sendJson(res, 400, { error: 'favorite must be a boolean.' }); return; }
     if (hasOwn(input, 'status') && !RESULT_ASSET_STATUSES.has(input.status)) { sendJson(res, 400, { error: 'status must be temp, archived, invalid, or deleted.' }); return; }
     if (hasOwn(input, 'tags')) asset.tags = [...new Set(input.tags.map((tag) => tag.trim()).filter(Boolean))];
+    if (hasOwn(input, 'qualityLabels')) asset.qualityLabels = [...input.qualityLabels];
     if (hasOwn(input, 'favorite')) asset.favorite = input.favorite;
     const timestamp = new Date().toISOString();
     if (hasOwn(input, 'status')) {

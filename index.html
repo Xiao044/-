@@ -1836,13 +1836,15 @@
           showToast(error.message || '历史草稿恢复失败');
         }
       };
-      const assetLibraryFilters = { search: '', status: '', platform: '', favorite: '', tag: '', promptVersion: '', jobId: '', attemptId: '', createdFrom: '', createdTo: '', includeDeleted: '' };
+      const assetLibraryFilters = { search: '', status: '', platform: '', favorite: '', tag: '', qualityLabel: '', promptVersion: '', jobId: '', attemptId: '', createdFrom: '', createdTo: '', includeDeleted: '' };
       let assetLibraryAssets = [];
       let assetLibraryLoading = false;
       let assetLibraryError = '';
       let assetLibraryRequestId = 0;
+      const pendingAssetQualityUpdates = new Set();
       const assetStatusLabels = { temp: '临时', archived: '已归档', invalid: '无效', deleted: '已删除' };
       const assetPlatformLabels = { doubao: '豆包', chatgpt: 'ChatGPT', gemini: 'Gemini', lovart: 'Lovart' };
+      const assetQualityLabels = { usable: '可用', discarded: '弃用', subject_complete: '主体完整', structure_preserved: '结构保留', clear: '清晰' };
       const assetStatusLabel = (status) => assetStatusLabels[status] || status || '未知';
       const assetPlatformLabel = (platform) => assetPlatformLabels[platform] || platform || '未知平台';
       const assetTime = (value) => {
@@ -1857,7 +1859,7 @@
       };
       const assetLibraryQuery = () => {
         const params = new URLSearchParams();
-        ['status', 'platform', 'favorite', 'tag', 'jobId', 'attemptId', 'createdFrom', 'createdTo'].forEach((key) => {
+        ['status', 'platform', 'favorite', 'tag', 'qualityLabel', 'jobId', 'attemptId', 'createdFrom', 'createdTo'].forEach((key) => {
           const value = String(assetLibraryFilters[key] || '').trim();
           if (value) params.set(key, value);
         });
@@ -1881,6 +1883,7 @@
         <select data-asset-filter="platform" aria-label="按平台筛选"><option value="">全部平台</option>${Object.entries(assetPlatformLabels).map(([key, label]) => `<option value="${key}"${assetLibraryFilters.platform === key ? ' selected' : ''}>${label}</option>`).join('')}</select>
         <select data-asset-filter="favorite" aria-label="按收藏筛选"><option value="">收藏不限</option><option value="true"${assetLibraryFilters.favorite === 'true' ? ' selected' : ''}>仅收藏</option><option value="false"${assetLibraryFilters.favorite === 'false' ? ' selected' : ''}>未收藏</option></select>
         <input type="search" data-asset-filter="tag" aria-label="按标签筛选" placeholder="标签" value="${escapeHtml(assetLibraryFilters.tag)}">
+        <select data-asset-filter="qualityLabel" aria-label="按质量标签筛选"><option value="">质量不限</option>${Object.entries(assetQualityLabels).map(([key, label]) => `<option value="${key}"${assetLibraryFilters.qualityLabel === key ? ' selected' : ''}>${label}</option>`).join('')}</select>
         <input type="number" min="1" step="1" data-asset-filter="promptVersion" aria-label="按提示词版本筛选" placeholder="提示词版本" value="${escapeHtml(assetLibraryFilters.promptVersion)}">
         <input type="search" data-asset-filter="jobId" aria-label="按任务编号筛选" placeholder="任务 ID" value="${escapeHtml(assetLibraryFilters.jobId)}">
         <input type="search" data-asset-filter="attemptId" aria-label="按尝试编号筛选" placeholder="尝试 ID" value="${escapeHtml(assetLibraryFilters.attemptId)}">
@@ -1899,6 +1902,7 @@
           const thumbnail = asset.thumbnailUrl || asset.archivedUrl || asset.url;
           const dimensions = asset.dimensions ? `${asset.dimensions.width} × ${asset.dimensions.height}` : '尺寸未知';
           const tags = Array.isArray(asset.tags) ? asset.tags : [];
+          const qualityLabels = Array.isArray(asset.qualityLabels) ? asset.qualityLabels : [];
           const sourceUrl = String(asset.sourceUrl || '').trim();
           const archivedUrl = String(asset.archivedUrl || asset.url || '').trim();
           const isSafeAssetLink = (href) => /^https?:\/\//i.test(href) || /^\/uploads(?:\/|$)/.test(href);
@@ -1930,6 +1934,7 @@
             <div class="asset-card-links">${assetLink('来源', sourceUrl, sourceAssetUrl)}${assetLink('已归档', archivedUrl, archivedAssetUrl)}${archivedAssetUrl ? `<button class="asset-card-link" type="button" data-asset-action="copy-url" data-asset-id="${escapeHtml(asset.assetId)}">复制绝对 URL</button>` : ''}</div>
             <div class="asset-card-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<em>暂无标签</em>'}</div>
             <div class="asset-card-tag-editor"><input type="text" data-asset-tags-input="${escapeHtml(asset.assetId)}" value="${escapeHtml(tags.join(', '))}" aria-label="${escapeHtml(asset.assetId)} 标签" placeholder="标签，用逗号分隔"><button class="text-button" type="button" data-asset-action="save-tags" data-asset-id="${escapeHtml(asset.assetId)}">保存标签</button></div>
+            <div class="asset-quality-labels" aria-label="质量标签">${Object.entries(assetQualityLabels).map(([key, label]) => `<button class="asset-quality-label${qualityLabels.includes(key) ? ' is-selected' : ''}" type="button" data-asset-action="quality-label" data-asset-id="${escapeHtml(asset.assetId)}" data-quality-label="${key}" aria-pressed="${qualityLabels.includes(key) ? 'true' : 'false'}">${label}</button>`).join('')}</div>
             <div class="asset-card-footer"><span>${escapeHtml(asset.attemptId ? `尝试 ${asset.attemptId}` : '来源已归档')}</span>${lifecycleAction}</div></div>
           </article>`;
         }).join('');
@@ -1992,6 +1997,34 @@
           } catch (error) {
             if (isAssetLibraryView(session)) showToast('复制 URL 失败');
           } finally { if (copyButton) copyButton.disabled = false; }
+          return;
+        }
+        if (action === 'quality-label') {
+          if (pendingAssetQualityUpdates.has(assetId)) return;
+          const label = modalBody.querySelector(`[data-asset-action="quality-label"][data-asset-id="${CSS.escape(assetId)}"][data-quality-label]`)?.dataset.qualityLabel;
+          if (!Object.hasOwn(assetQualityLabels, label)) return;
+          const nextLabels = new Set(asset.qualityLabels || []);
+          if (nextLabels.has(label)) nextLabels.delete(label);
+          else {
+            nextLabels.add(label);
+            if (label === 'usable') nextLabels.delete('discarded');
+            if (label === 'discarded') nextLabels.delete('usable');
+          }
+          const options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qualityLabels: [...nextLabels] }) };
+          const qualityButtons = () => [...modalBody.querySelectorAll(`[data-asset-action="quality-label"][data-asset-id="${CSS.escape(assetId)}"]`)];
+          pendingAssetQualityUpdates.add(assetId);
+          qualityButtons().forEach((button) => { button.disabled = true; });
+          try {
+            const response = await fetch(`${projectApiUrl}/result-assets/${encodeURIComponent(assetId)}`, options);
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || '质量标签更新失败');
+            if (isAssetLibraryView(session)) await fetchAssetLibrary({ session });
+          } catch (error) {
+            if (isAssetLibraryView(session)) showToast(error.message || '质量标签更新失败');
+          } finally {
+            pendingAssetQualityUpdates.delete(assetId);
+            qualityButtons().forEach((button) => { button.disabled = false; });
+          }
           return;
         }
         if (action === 'delete' && !window.confirm('删除后结果资产会移入回收状态，确定继续吗？')) return;

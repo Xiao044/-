@@ -955,6 +955,10 @@ h1 { font-size: 24px; line-height: 1.25; }
 .asset-card-tag-editor { display: flex; gap: 6px; align-items: center; }
 .asset-card-tag-editor input { min-width: 0; flex: 1; height: 27px; padding: 0 7px; border: 1px solid #eee5d2; border-radius: 5px; background: #fffdf8; color: #746d59; font: inherit; font-size: 10px; }
 .asset-card-tag-editor .text-button { flex-shrink: 0; font-size: 10px; }
+.asset-quality-labels { display: flex; flex-wrap: wrap; gap: 5px; }
+.asset-quality-label { min-width: 0; padding: 3px 6px; border: 1px solid #e7e3d7; border-radius: 4px; background: #fff; color: #77766e; font: inherit; font-size: 10px; cursor: pointer; }
+.asset-quality-label:hover { border-color: #84977b; }
+.asset-quality-label.is-selected { border-color: #6b8061; background: #e9f0e5; color: #3f5c3a; }
 .asset-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 7px; border-top: 1px solid #f0eadb; color: #aaa087; font-size: 9px; }
 .asset-card-footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-card-footer .is-danger { color: #a1684c; }

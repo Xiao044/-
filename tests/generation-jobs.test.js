@@ -133,6 +133,7 @@ test('result assets are indexed, filterable, editable, soft-deleted, and persist
   assert.deepEqual(asset.dimensions, { width: 640, height: 480 });
   assert.match(asset.archivedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(asset.status, 'archived');
+  assert.deepEqual(asset.qualityLabels, []);
   assert.equal(asset.projectId, 'demo');
   assert.equal(asset.jobId, job.jobId);
   assert.equal(asset.platform, 'doubao');
@@ -140,6 +141,24 @@ test('result assets are indexed, filterable, editable, soft-deleted, and persist
   const edited = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ tags: [' campaign ', 'hero', 'campaign'], favorite: true }) });
   assert.equal(edited.status, 200);
   assert.deepEqual((await edited.json()).asset.tags, ['campaign', 'hero']);
+  const usable = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ qualityLabels: ['usable', 'subject_complete', 'structure_preserved', 'clear'] }) });
+  assert.equal(usable.status, 200);
+  assert.deepEqual((await usable.json()).asset.qualityLabels, ['usable', 'subject_complete', 'structure_preserved', 'clear']);
+  const discarded = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ qualityLabels: ['discarded', 'clear'] }) });
+  assert.equal(discarded.status, 200);
+  assert.deepEqual((await discarded.json()).asset.qualityLabels, ['discarded', 'clear']);
+  const cleared = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ qualityLabels: [] }) });
+  assert.equal(cleared.status, 200);
+  const invalidQualityLabels = await Promise.all([
+    { qualityLabels: ['unknown'] }, { qualityLabels: ['usable', 'discarded'] }, { qualityLabels: ['clear', 'clear'] }, { qualityLabels: 'clear' }
+  ].map((body) => json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify(body) })));
+  assert.deepEqual(invalidQualityLabels.map((response) => response.status), [400, 400, 400, 400]);
+  const preservedSource = await json(server.base, '/api/projects/demo/result-assets/' + asset.assetId, { method: 'PATCH', body: JSON.stringify({ qualityLabels: ['usable', 'clear'] }) });
+  assert.equal((await preservedSource.json()).asset.sourceUrl, 'https://source.example.test/generated.png');
+  const qualityFiltered = await (await fetch(server.base + '/api/projects/demo/result-assets?qualityLabel=usable')).json();
+  assert.equal(qualityFiltered.assets.length, 1);
+  assert.deepEqual(qualityFiltered.assets[0].qualityLabels, ['usable', 'clear']);
+  assert.equal((await fetch(server.base + '/api/projects/demo/result-assets?qualityLabel=unknown')).status, 400);
   const filtered = await (await fetch(server.base + '/api/projects/demo/result-assets?favorite=true&tag=hero&platform=doubao')).json();
   assert.equal(filtered.assets.length, 1);
   assert.equal(filtered.assets[0].assetId, asset.assetId);
@@ -186,8 +205,25 @@ test('result assets are indexed, filterable, editable, soft-deleted, and persist
   assert.equal(persisted.assets[0].status, 'deleted');
   assert.equal(persisted.assets[0].favorite, true);
   assert.deepEqual(persisted.assets[0].tags, ['campaign', 'hero']);
+  assert.deepEqual(persisted.assets[0].qualityLabels, ['usable', 'clear']);
   const savedJobs = await (await fetch(restarted.base + '/api/projects/demo/generation-jobs')).json();
   assert.equal(savedJobs.jobs[0].platforms.doubao.savedResults[0].assetId, asset.assetId);
+});
+
+
+test('legacy result assets normalize missing quality labels to an empty array', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-result-assets-legacy-quality-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dataDir, 'result-assets.json'), JSON.stringify({ demo: { 'asset-legacy-12345678': { assetId: 'asset-legacy-12345678', url: '/uploads/demo/legacy.png', tags: ['old-tag'] } } }), 'utf8');
+  const server = await startServer(t, { dataDir });
+  const response = await json(server.base, '/api/projects/demo/result-assets');
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).assets[0].qualityLabels, []);
+  server.child.kill();
+  await new Promise((resolve, reject) => { if (server.child.exitCode !== null) return resolve(); server.child.once('exit', resolve); server.child.once('error', reject); });
+  const restarted = await startServer(t, { dataDir });
+  const persisted = await json(restarted.base, '/api/projects/demo/result-assets');
+  assert.deepEqual((await persisted.json()).assets[0].qualityLabels, []);
 });
 
 test('malformed result asset route parts return 400 and health remains available', async (t) => {
@@ -243,6 +279,15 @@ test('result asset library frontend exposes server filters and asset mutations',
   assert.match(source, /data-asset-filter="platform"/);
   assert.match(source, /data-asset-filter="favorite"/);
   assert.match(source, /data-asset-filter="tag"/);
+  assert.match(source, /data-asset-filter="qualityLabel"/);
+  assert.match(source, /qualityLabels: \[\.\.\.nextLabels\]/);
+  assert.match(source, /pendingAssetQualityUpdates\.has\(assetId\)/);
+  assert.match(source, /pendingAssetQualityUpdates\.add\(assetId\)[\s\S]*qualityButtons\(\)\.forEach\(\(button\) => \{ button\.disabled = true; \}\)/);
+  assert.match(source, /finally \{[\s\S]*pendingAssetQualityUpdates\.delete\(assetId\)/);
+  assert.match(source, /if \(label === 'usable'\) nextLabels\.delete\('discarded'\)/);
+  assert.match(source, /if \(label === 'discarded'\) nextLabels\.delete\('usable'\)/);
+  assert.match(source, /data-asset-action="quality-label"/);
+  assert.match(source, /data-quality-label="\$\{key\}"/);
   assert.match(source, /data-asset-filter="promptVersion"/);
   assert.match(source, /data-asset-filter="jobId"/);
   assert.match(source, /data-asset-filter="attemptId"/);
