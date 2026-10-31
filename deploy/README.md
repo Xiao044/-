@@ -2,6 +2,18 @@
 
 当前项目使用 Node 内置模块提供 DeepSeek 后端代理，Nginx 负责静态文件和 `/api/` 反向代理。以下命令在 Ubuntu 22.04 服务器执行。
 
+## 发布前本地检查
+
+在项目根目录运行：
+
+```bash
+node scripts/release-smoke.js
+```
+
+脚本会在系统临时目录创建独立的 `ZAOTU_DATA_DIR`，使用临时端口启动 `server.js`，然后检查 `/api/health`、首页、敏感静态路径（`/data`、`.env`、`/deploy`、`/backups`、`/tmp`）以及项目导出/导入。检查结束后会停止子进程并删除临时数据；不会读取或写入仓库的 `data/`。
+
+这项检查已经覆盖本机 Node 服务的路由和临时文件存储行为。它不替代浏览器验收，也不能证明 ECS、Nginx、域名、HTTPS、systemd/PM2、真实 DeepSeek 凭据或公网网络配置已经验证；这些项目仍需在目标环境中检查。
+
 ## 1. 安装 Nginx
 
 ```bash
