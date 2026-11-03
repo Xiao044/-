@@ -1470,7 +1470,7 @@
         } else if (stepName === 'b') {
           host.innerHTML = `<label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
-          host.innerHTML = `<p class="generation-intro">可多选；各平台独立运行。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p class="generation-intro">可多选；各平台独立运行。当前四个平台均未验收，支持手动导入。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '未验收' : '实验性 · 未验收'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
           renderPlatformOverridesEditor();
           renderPlatformStatuses();
@@ -1520,14 +1520,14 @@
         ? String(value ?? '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
         : String(value ?? '').trim();
       const refreshDraftFieldSource = (key) => {
-        const badge = detailContent.querySelector(`[data-agent-field-source="${key}"]`);
+        const badge = detailContents.a.querySelector(`[data-agent-field-source="${key}"]`);
         if (!badge) return;
         badge.textContent = '待保存修改';
         badge.classList.add('is-unsaved');
       };
       const refreshSavedDraftFieldSources = () => {
         for (const definition of agentDraftFieldDefinitions) {
-          const badge = detailContent.querySelector(`[data-agent-field-source="${definition.key}"]`);
+          const badge = detailContents.a.querySelector(`[data-agent-field-source="${definition.key}"]`);
           if (!badge) continue;
           const field = getDraftField(definition.key);
           badge.textContent = field.source === 'user' ? '用户资料' : 'Agent 整理';
@@ -1967,7 +1967,7 @@
         renderAssetLibrary();
         return true;
       };
-      const handleAssetAction = async (action, assetId = '') => {
+      const handleAssetAction = async (action, assetId = '', qualityLabel = '') => {
         if (action === 'refresh') { fetchAssetLibrary({ session: modalSession }); return; }
         const session = modalSession;
         const asset = assetLibraryAssets.find((item) => item.assetId === assetId);
@@ -1995,7 +1995,7 @@
         }
         if (action === 'quality-label') {
           if (pendingAssetQualityUpdates.has(assetId)) return;
-          const label = modalBody.querySelector(`[data-asset-action="quality-label"][data-asset-id="${CSS.escape(assetId)}"][data-quality-label]`)?.dataset.qualityLabel;
+          const label = qualityLabel;
           if (!Object.hasOwn(assetQualityLabels, label)) return;
           const nextLabels = new Set(asset.qualityLabels || []);
           if (nextLabels.has(label)) nextLabels.delete(label);
@@ -2113,12 +2113,12 @@
       const collectAgentDraftPatch = () => {
         const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
         const baseDraft = run?.output?.draft || descriptionADraft || {};
-        const nextDescription = document.querySelector('#description-editor')?.value.trim() || '';
+        const nextDescription = detailContents.a.querySelector('#description-editor')?.value.trim() || '';
         const patch = {};
         if (nextDescription !== String(baseDraft.rawText || descriptionA || '').trim()) patch.rawText = nextDescription;
         const fields = {};
         for (const definition of agentDraftFieldDefinitions) {
-          const input = detailContent.querySelector(`[data-agent-field="${definition.key}"]`);
+          const input = detailContents.a.querySelector(`[data-agent-field="${definition.key}"]`);
           if (!input) continue;
           const nextValue = parseDraftFieldInput(definition, input.value);
           const storedField = baseDraft.fields?.[definition.key] || getDraftField(definition.key);
@@ -2189,8 +2189,8 @@
       };
       const validateDescriptionAConfirmation = (nextDescription) => {
         const currentRun = agentRunHistory.find((item) => item.runId === currentAgentRunId);
-        if (currentRun?.accepted) return [];
-        const fieldValue = (key) => detailContent.querySelector(`[data-agent-field="${key}"]`)?.value.trim() || '';
+        if (currentRun?.accepted || currentRun?.legacyCompatibility?.allowIncompleteSemanticMinimum) return [];
+        const fieldValue = (key) => detailContents.a.querySelector(`[data-agent-field="${key}"]`)?.value.trim() || '';
         const errors = [];
         if (!nextDescription) errors.push('A 版原始文本不能为空');
         if (!fieldValue('productFactsSummary')) errors.push('请补充商品事实摘要');
@@ -2207,7 +2207,7 @@
           if (!accepted) return;
           resetDownstream(2);
         }
-        const confirmButton = detailContent.querySelector('[data-detail-action="confirm-a"]');
+        const confirmButton = detailContents.a.querySelector('[data-detail-action="confirm-a"]');
         if (!currentAgentRunId) {
           try {
             await saveAgentDraftEdits({ showFeedback: false });
@@ -2636,7 +2636,7 @@
         persistState();
         syncProject();
       });
-      detailContent.addEventListener('change', (event) => {
+      workflowCanvas.addEventListener('change', (event) => {
         if (event.target.matches('input[name="generation-platform"]')) {
           selectedGenerationPlatforms = new Set([...detailContent.querySelectorAll('input[name="generation-platform"]:checked')].map((input) => input.value));
           syncPlatformPicker();
@@ -2851,7 +2851,7 @@
         }
         const assetActionElement = event.target.closest('[data-asset-action]');
         if (assetActionElement) {
-          handleAssetAction(assetActionElement.dataset.assetAction, assetActionElement.dataset.assetId || '');
+          handleAssetAction(assetActionElement.dataset.assetAction, assetActionElement.dataset.assetId || '', assetActionElement.dataset.qualityLabel || '');
           return;
         }
         const taskSelection = event.target.closest('[data-task-select]');

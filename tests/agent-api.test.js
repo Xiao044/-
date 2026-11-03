@@ -19,21 +19,54 @@ const getAvailablePort = () => new Promise((resolve, reject) => {
   });
 });
 
-const startServer = async (t, { apiKey = '', mock = false, dataDir = '' } = {}) => {
+const removeOwnedTempData = (dataDir, prefix) => {
+  const resolved = fs.realpathSync(dataDir);
+  assert.equal(path.dirname(resolved), fs.realpathSync(os.tmpdir()));
+  assert.ok(path.basename(resolved).startsWith(prefix));
+  fs.rmSync(resolved, { recursive: true, force: true });
+};
+
+const startServer = async (t, { apiKey = '', mock = false, dataDir = '', afterStop } = {}) => {
+  const ownedDataDir = dataDir ? '' : fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-agent-api-'));
+  const serverDataDir = dataDir || ownedDataDir;
+  if (ownedDataDir) {
+    fs.writeFileSync(path.join(ownedDataDir, 'projects.json'), JSON.stringify({
+      'demo-pearl-necklace': { projectId: 'demo-pearl-necklace', projectName: 'Agent API fixture', product: { name: '珍珠项链', description: '保持项链结构' } }
+    }), 'utf8');
+  }
   const port = await getAvailablePort();
-  const env = { ...process.env, PORT: String(port), DEEPSEEK_BASE_URL: 'https://mock.deepseek.invalid', DEEPSEEK_MODEL: '4.0flash' };
-  env.DEEPSEEK_API_KEY = apiKey;
-  if (dataDir) env.ZAOTU_DATA_DIR = dataDir;
+  const env = { ...process.env, PORT: String(port), ZAOTU_DATA_DIR: serverDataDir, DEEPSEEK_BASE_URL: 'https://mock.deepseek.invalid', DEEPSEEK_MODEL: '4.0flash', DEEPSEEK_API_KEY: apiKey };
   const child = spawn(process.execPath, [...(mock ? ['-r', mockPath] : []), serverPath], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
+  let spawnError;
+  const exited = new Promise((resolve) => {
+    child.once('exit', resolve);
+    child.once('error', (error) => { spawnError = error; resolve(); });
+  });
+  const waitForExit = (milliseconds) => new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), milliseconds);
+    exited.then(() => { clearTimeout(timer); resolve(true); });
+  });
   child.stdout.on('data', (chunk) => { logs += chunk; });
   child.stderr.on('data', (chunk) => { logs += chunk; });
-  t.after(() => child.kill());
+  t.after(async () => {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      child.kill();
+      if (!await waitForExit(2000)) {
+        child.kill('SIGKILL');
+        assert.ok(await waitForExit(2000), 'test server did not exit; temporary data preserved');
+      }
+    }
+    await exited;
+    if (ownedDataDir) removeOwnedTempData(ownedDataDir, 'zaotu-agent-api-');
+    if (afterStop) await afterStop();
+  });
 
   const baseUrl = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`Server exited before ready: ${logs}`);
+    if (spawnError) throw spawnError;
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Server exited before ready: ${logs}`);
     try {
       const response = await fetch(`${baseUrl}/api/health`);
       if (response.ok) return baseUrl;
@@ -130,12 +163,6 @@ test('initial A normalization stays editable when optional structured fields are
 });
 
 test('project Agent runs are persisted and listed without changing the legacy response contract', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const createResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -160,12 +187,6 @@ test('project Agent runs are persisted and listed without changing the legacy re
 });
 
 test('invalid project Agent input persists a terminal failure timestamp', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const response = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -180,12 +201,6 @@ test('invalid project Agent input persists a terminal failure timestamp', async 
 });
 
 test('project Agent runs persist lifecycle states and cancellation wins over late model completion', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const pendingResponse = fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -228,12 +243,6 @@ test('project Agent runs persist lifecycle states and cancellation wins over lat
 });
 
 test('delayed Agent completion cannot overwrite an intervening project import', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const pendingResponse = fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -260,12 +269,6 @@ test('delayed Agent completion cannot overwrite an intervening project import', 
 });
 
 test('concurrent completed description runs receive distinct draft versions', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const createRun = (note) => fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -282,12 +285,6 @@ test('concurrent completed description runs receive distinct draft versions', as
 });
 
 test('project Agent fact warnings identify conflicts and clear after a user correction', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const createResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -316,12 +313,6 @@ test('project Agent fact warnings identify conflicts and clear after a user corr
 });
 
 test('project Agent run detail supports user edits and acceptance', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const createResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
@@ -389,12 +380,6 @@ test('project Agent run detail supports user edits and acceptance', async (t) =>
 });
 
 test('concurrent Agent mutations use compare-and-swap and preserve one update', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const created = await (await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validBody('CAS race'))
@@ -411,12 +396,6 @@ test('concurrent Agent mutations use compare-and-swap and preserve one update', 
 });
 
 test('follow-up runs do not advance A versions and accepting an older run keeps latestRunId stable', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const createRun = (body) => fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
@@ -444,12 +423,6 @@ test('follow-up runs do not advance A versions and accepting an older run keeps 
 });
 
 test('new A runs with missing semantic fields are rejected only at acceptance', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const created = await fetch(baseUrl + '/api/projects/demo-pearl-necklace/agent-runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validBody('__mock_missing_optional_fields__')) });
   assert.equal(created.status, 201);
@@ -461,7 +434,6 @@ test('new A runs with missing semantic fields are rejected only at acceptance', 
 
 test('migrated accepted A drafts with missing semantic fields remain confirmable', async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaotu-agent-legacy-accepted-'));
-  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const legacyRun = {
     runId: 'legacy-run', schemaVersion: 1, task: 'description_a', status: 'completed', version: 1,
     input: { task: 'description_a', projectId: 'legacy-project', product: {}, creativeDirection: { scene: '', note: '' }, conversation: [] },
@@ -469,7 +441,7 @@ test('migrated accepted A drafts with missing semantic fields remain confirmable
     accepted: true, acceptedAt: '2026-10-27T00:00:00.000Z', acceptedVersion: 1, createdAt: '2026-10-27T00:00:00.000Z', completedAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z'
   };
   fs.writeFileSync(path.join(dataDir, 'projects.json'), JSON.stringify({ 'legacy-project': { projectId: 'legacy-project', progress: 4, agent: { schemaVersion: 1, latestRunId: 'legacy-run', acceptedRunId: 'legacy-run', latestDraftVersion: 1, runs: [legacyRun] } } }), 'utf8');
-  const baseUrl = await startServer(t, { dataDir });
+  const baseUrl = await startServer(t, { dataDir, afterStop: () => removeOwnedTempData(dataDir, 'zaotu-agent-legacy-accepted-') });
   const endpoint = baseUrl + '/api/projects/legacy-project/agent-runs/legacy-run/accept';
   const restore = await fetch(baseUrl + '/api/projects/legacy-project/agent-runs/legacy-run/restore', { method: 'POST' });
   assert.equal(restore.status, 201);
@@ -490,12 +462,6 @@ test('migrated accepted A drafts with missing semantic fields remain confirmable
 });
 
 test('ordinary project saves cannot erase server-owned Agent history', async (t) => {
-  const projectsPath = path.join(root, 'data', 'projects.json');
-  const originalProjects = fs.readFileSync(projectsPath, 'utf8');
-  t.after(() => fs.writeFileSync(projectsPath, originalProjects, 'utf8'));
-  const isolatedProjects = JSON.parse(originalProjects);
-  delete isolatedProjects['demo-pearl-necklace'].agent;
-  fs.writeFileSync(projectsPath, JSON.stringify(isolatedProjects, null, 2), 'utf8');
   const baseUrl = await startServer(t, { apiKey: 'test-key', mock: true });
   const createdResponse = await fetch(`${baseUrl}/api/projects/demo-pearl-necklace/agent-runs`, {
     method: 'POST',
