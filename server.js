@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
+const { makeImagePackage } = require('./lib/image-package');
 const {
   ERROR_CODES: AGENT_ERROR_CODES,
   applyUserDraftEdits,
@@ -684,6 +685,34 @@ const withProjectDataMutation = (operation) => {
   const run = projectDataMutationTail.then(operation);
   projectDataMutationTail = run.catch(() => {});
   return run;
+};
+
+const handleImagePackageExport = (req, res) => {
+  const match = req.url.match(/^\/api\/projects\/([^/?]+)\/export-images(?:\?.*)?$/);
+  const projectId = match ? decodeRoutePart(match[1]) : '';
+  if (!isValidProjectId(projectId)) { sendJson(res, 400, { error: 'Invalid project id.' }); return; }
+  try {
+    const projects = fs.existsSync(projectStorePath) ? JSON.parse(fs.readFileSync(projectStorePath, 'utf8')) : {};
+    if (!isPlainObject(projects)) throw new Error('Invalid project store');
+    if (!hasOwn(projects, projectId) || !isPlainObject(projects[projectId])) { sendJson(res, 404, { error: 'Project not found.' }); return; }
+    const store = fs.existsSync(resultAssetsPath) ? JSON.parse(fs.readFileSync(resultAssetsPath, 'utf8')) : {};
+    if (!isPlainObject(store) || (hasOwn(store, projectId) && !isPlainObject(store[projectId]))) throw new Error('Invalid result asset store');
+    const { bytes, manifest } = makeImagePackage({ projectId, assets: hasOwn(store, projectId) ? store[projectId] : {}, uploadsDir });
+    res.writeHead(200, {
+      'Content-Type': 'application/zip', 'Content-Length': bytes.length,
+      'Content-Disposition': `attachment; filename="project-images.zip"; filename*=UTF-8''${encodeURIComponent(projectId + '-images.zip')}`,
+      'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'X-Export-Image-Count, X-Export-Warning-Count',
+      'X-Export-Image-Count': String(manifest.summary.imageFiles),
+      'X-Export-Warning-Count': String(manifest.summary.warningCount)
+    });
+    res.end(bytes);
+  } catch (error) {
+    sendJson(res, error.status === 413 ? 413 : 500, {
+      error: error.status === 413 ? error.message : 'Image package export failed; check project and asset data.',
+      errorCode: error.status === 413 ? error.code : 'IMAGE_EXPORT_FAILED'
+    });
+  }
 };
 
 const handleProjectExport = async (req, res) => {
@@ -2211,6 +2240,7 @@ const serveStatic = (req, res) => {
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS' }); res.end(); return; }
   if (req.method === 'GET' && req.url === '/api/health') { sendJson(res, 200, { ok: true, provider: 'deepseek', configured: Boolean(deepseekApiKey), imageProvider: 'multi-platform-extension' }); return; }
+  if (req.method === 'GET' && /^\/api\/projects\/[^/?]+\/export-images(?:\?.*)?$/.test(req.url)) { handleImagePackageExport(req, res); return; }
   if (req.method === 'POST' && req.url === '/api/agent') { await handleAgent(req, res); return; }
   if (req.method === 'GET' && /^\/api\/projects\/[^/?]+\/export(?:\?.*)?$/.test(req.url)) { await handleProjectExport(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/import(?:\?.*)?$/.test(req.url)) { await handleProjectImport(req, res); return; }

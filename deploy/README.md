@@ -30,7 +30,7 @@ sudo apt install -y nodejs
 /var/www/zaotu/
 ```
 
-目录中至少应包含 `index.html`、`styles.css`、`server.js`、`.env` 和 `assets/`。`.env` 中设置 `DEEPSEEK_API_KEY`，不要提交到 Git。服务会在项目目录下创建 `data/projects.json` 保存项目状态，并将上传的商品图片写入 `data/uploads/`，请确保运行 Node 服务的用户对 `data/` 具有读写权限。
+目录中至少应包含 `index.html`、`styles.css`、`server.js`、`.env`、`assets/`、`agent/` 和 `lib/`。`.env` 中设置 `DEEPSEEK_API_KEY`，不要提交到 Git。服务会在项目目录下创建 `data/projects.json` 保存项目状态，并将上传的商品图片写入 `data/uploads/`，请确保运行 Node 服务的用户对 `data/` 具有读写权限。
 
 ## 3. 配置站点
 

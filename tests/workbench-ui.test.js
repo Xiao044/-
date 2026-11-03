@@ -216,3 +216,74 @@ test('generation picker renders explicit unverified platform status and keeps ma
   assert.match(host.innerHTML, /实验性/);
   assert.match(host.innerHTML, /data-bridge-action="manual-result"/);
 });
+
+const makeImageExportContext = () => {
+  const button = { disabled: false }, calls = [], context = {
+    projectId: 'alpha', projectApiUrl: '/api/projects/alpha', projectSession: 1, projectName: '珍珠项链', imageExportPending: false,
+    projectFilename: (name) => name, showToast: (message) => calls.push(['toast', message]),
+    URL: { createObjectURL: () => { calls.push(['url']); return 'blob:zip'; }, revokeObjectURL: (url) => calls.push(['revoke', url]) },
+    window: { setTimeout: (callback) => callback() },
+    document: {
+      querySelector: () => button, body: { appendChild: (anchor) => calls.push(['append', anchor]) },
+      createElement: () => ({ click() { calls.push(['download', this.download]); }, remove() { calls.push(['remove']); } })
+    },
+    fetch: async () => ({ ok: true, blob: async () => ({ type: 'application/zip' }), headers: { get: (name) => name === 'X-Export-Image-Count' ? '2' : '1' } })
+  };
+  vm.createContext(context);
+  const registration = source.split('\n').find((line) => line.includes("?.addEventListener('click', exportProjectImages)"));
+  assert.ok(registration, 'missing image export button registration');
+  context.document.querySelector = (selector) => {
+    assert.equal(selector, '[data-project-action="export-images"]');
+    return { ...button, addEventListener: (_type, handler) => { context.clickExport = handler; }, get disabled() { return button.disabled; }, set disabled(value) { button.disabled = value; } };
+  };
+  vm.runInContext(declaration('exportProjectImages') + '\n' + registration, context);
+  return { context, calls, button };
+};
+
+test('image export button downloads ZIP, cleans its object URL and reports manifest warnings', async () => {
+  const { context, calls, button } = makeImageExportContext();
+  await context.clickExport();
+  assert.deepEqual(calls.find(([name]) => name === 'download'), ['download', '珍珠项链-images.zip']);
+  assert.ok(calls.some(([name]) => name === 'remove'));
+  assert.deepEqual(calls.find(([name]) => name === 'revoke'), ['revoke', 'blob:zip']);
+  assert.match(calls.find(([name]) => name === 'toast')[1], /2 张图片；1 项未导出.*manifest.json/);
+  assert.equal(button.disabled, false);
+  assert.equal(context.imageExportPending, false);
+});
+
+test('image export blocks repeated clicks and allows retry after JSON and network failures', async () => {
+  const { context, button, calls } = makeImageExportContext();
+  let release, requests = 0;
+  context.fetch = () => { requests++; return new Promise((resolve) => { release = resolve; }); };
+  const first = context.clickExport();
+  await context.clickExport();
+  assert.equal(requests, 1);
+  assert.equal(button.disabled, true);
+  release({ ok: false, json: async () => ({ error: 'Image package exceeds its size limit.' }) });
+  await first;
+  assert.equal(button.disabled, false);
+  assert.match(calls.find(([name]) => name === 'toast')[1], /exceeds its size limit/);
+  context.fetch = async () => { throw new Error('offline'); };
+  await context.clickExport();
+  assert.deepEqual(calls.at(-1), ['toast', 'offline']);
+  assert.equal(context.imageExportPending, false);
+  assert.equal(calls.some(([name]) => name === 'download'), false);
+});
+
+test('image export ignores old project responses before and after asynchronous blob reads', async () => {
+  for (const phase of ['response', 'blob']) {
+    const { context, calls, button } = makeImageExportContext();
+    let release;
+    const pending = new Promise((resolve) => { release = resolve; });
+    const response = { ok: true, blob: async () => phase === 'blob' ? pending : ({}), headers: { get: () => '0' } };
+    context.fetch = async () => phase === 'response' ? pending : response;
+    const running = context.clickExport();
+    await Promise.resolve();
+    context.projectSession++;
+    release(phase === 'response' ? response : {});
+    await running;
+    assert.equal(calls.length, 0, `stale ${phase} must not download or notify`);
+    assert.equal(button.disabled, false);
+    assert.equal(context.imageExportPending, false);
+  }
+});
