@@ -162,6 +162,21 @@
   margin: 0;
 }
 
+@media (max-width: 1120px) {
+  .welcome-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .project-tools {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-self: stretch;
+    padding-bottom: 0;
+  }
+}
+
 @media (max-width: 680px) {
   :root {
     --workspace-topbar-height: 59px;
@@ -314,21 +329,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 52px;
+  min-height: 38px;
   margin: 0 0 12px;
 }
 
 .workflow-node-heading > div:first-child {
   min-width: 0;
-}
-
-.workflow-node-eyebrow {
-  display: block;
-  margin-bottom: 4px;
-  color: #9c8952;
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0;
 }
 
 .workflow-node-heading h2 {
@@ -559,10 +565,6 @@
     gap: 8px;
     min-height: 0;
     margin-bottom: 9px;
-  }
-
-  .workflow-node-eyebrow {
-    font-size: 8px;
   }
 
   .workflow-node-heading h2 {

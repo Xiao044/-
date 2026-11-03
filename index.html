@@ -37,7 +37,7 @@
     <aside class="sidebar" aria-label="主导航">
       <a class="brand" href="#workspace" aria-label="造图工作台首页">
         <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-        <span class="brand-copy"><strong>造图<span>studio</span></strong><small>让好商品被看见</small></span>
+        <span class="brand-copy"><strong>造图<span>studio</span></strong></span>
       </a>
       <button class="new-project" type="button" aria-label="新建项目"><svg class="ui-icon"><use href="#i-plus"/></svg><span>新建项目</span></button>
       <nav class="primary-nav" aria-label="工作空间">
@@ -53,14 +53,8 @@
         <div class="nav-submenu" id="nav-submenu-prompts" aria-label="提示词库子菜单"><a href="#node-a-title" data-nav-subitem="description">描述词 A</a><a href="#node-b-title" data-nav-subitem="prompt">提示词 B</a></div>
       </nav>
       <div class="sidebar-bottom">
-        <div class="sidebar-tip">
-          <svg class="ui-icon tip-sun"><use href="#i-sun"/></svg>
-          <strong>好想法，慢慢成形。</strong>
-          <p>每一步都可以停下来，<br>让创作保持自己的节奏。</p>
-          <a href="#workflow">了解工作流 <span aria-hidden="true">↗</span></a>
-        </div>
         <a class="help-link" href="#prototype-note" aria-label="使用指南"><svg class="ui-icon"><use href="#i-help"/></svg><span>使用指南</span><span aria-hidden="true">↗</span></a>
-        <div class="profile"><div class="avatar">M</div><div class="profile-copy"><strong>我的工作空间</strong><small>个人创作空间</small></div><span class="profile-chevron" aria-hidden="true">⌃<br>⌄</span></div>
+        <div class="profile"><div class="avatar">M</div><div class="profile-copy"><strong>我的工作空间</strong></div><span class="profile-chevron" aria-hidden="true">⌃<br>⌄</span></div>
       </div>
     </aside>
     <main class="app-main" id="workspace">
@@ -70,11 +64,11 @@
       </header>
       <div class="page-content">
         <section class="welcome-row" id="project">
-          <div><div class="page-kicker"><svg class="ui-icon"><use href="#i-sun"/></svg>一点灵感，慢慢成像</div><h1>商品图工作台<span class="title-period">.</span></h1><p class="page-description">把商品信息变成创作方向，让每一步都有迹可循。</p></div>
+          <div><h1>商品图工作台<span class="title-period">.</span></h1></div>
           <div class="project-tools"><button class="button button-secondary" type="button" data-open-task-center><svg class="ui-icon"><use href="#i-grid"/></svg>任务中心</button><button class="button button-secondary" type="button" data-open-asset-library><svg class="ui-icon"><use href="#i-image"/></svg>结果资产库</button><button class="button button-secondary" type="button" data-open-version-history><svg class="ui-icon"><use href="#i-clock"/></svg>版本记录</button><button class="button button-secondary" type="button" data-open-prompt-templates><svg class="ui-icon"><use href="#i-bookmark"/></svg>提示词模板</button><button class="button button-secondary project-data-action" type="button" data-project-action="export"><svg class="ui-icon"><use href="#i-external"/></svg>导出项目</button><button class="button button-secondary project-data-action" type="button" data-project-action="import"><svg class="ui-icon"><use href="#i-folder"/></svg>导入项目</button><input class="project-import-input" id="project-import-input" type="file" accept="application/json,.json" aria-label="选择项目 JSON 文件"><button class="button button-primary" type="button"><svg class="ui-icon"><use href="#i-save"/></svg>保存项目</button></div>
         </section>
         <section class="workflow-panel" id="workflow" aria-labelledby="workflow-title">
-          <div class="workflow-heading"><div><h2 id="workflow-title">创作流程</h2><span class="workflow-caption">一步一步，让想法更清晰</span></div><span class="workflow-hint"><svg class="ui-icon"><use href="#i-pause"/></svg>已完成步骤可点击回退</span></div>
+          <div class="workflow-heading"><div><h2 id="workflow-title">创作流程</h2></div><span class="workflow-hint"><svg class="ui-icon"><use href="#i-pause"/></svg>已完成步骤可点击回退</span></div>
           <div class="step-scroll"><ol class="step-track">
             <li class="flow-step completed"><button class="flow-step-button" type="button" data-step-jump="0" aria-label="回到商品资料"><span class="step-number"><svg class="ui-icon"><use href="#i-check"/></svg></span><span class="step-text"><strong>商品资料</strong><small>已完成</small></span></button><span class="step-link" aria-hidden="true"></span></li>
             <li class="flow-step current" aria-current="step"><button class="flow-step-button" type="button" data-step-jump="1" aria-label="回到 Agent 整理"><span class="step-number">02</span><span class="step-text"><strong>Agent 整理</strong><small><i></i>等待回答</small></span></button><span class="step-link" aria-hidden="true"></span></li>
@@ -89,15 +83,15 @@
             <section class="workflow-node" data-workflow-node="0" data-scroll-region="product" aria-labelledby="node-product-title">
               <div class="workflow-node-rail"><span class="workflow-node-marker"><span>01</span></span></div>
               <div class="workflow-node-main">
-                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 01 · FOUNDATION</span><h2 id="node-product-title">商品资料</h2><p>先确认商品本身，再开始构思画面</p></div><span class="node-state is-complete"><svg class="ui-icon"><use href="#i-check"/></svg>已完成</span></header>
+                <header class="workflow-node-heading"><div><h2 id="node-product-title">商品资料</h2></div><span class="node-state is-complete"><svg class="ui-icon"><use href="#i-check"/></svg>已完成</span></header>
             <section class="canvas-panel" aria-labelledby="canvas-title">
               <header class="canvas-toolbar">
-                <div><h2 id="canvas-title">创作画布</h2><p>商品原图、提示词与生成结果</p></div>
+                <div><h2 id="canvas-title">创作画布</h2></div>
                 <span class="canvas-indicator"><svg class="ui-icon"><use href="#i-image"/></svg>商品主图</span>
               </header>
               <div class="canvas-surface">
                 <article class="canvas-artboard">
-                  <div class="artboard-heading"><span>商品原图</span><span>当前项目素材</span></div>
+                  <div class="artboard-heading"><span>商品原图</span></div>
                   <div class="product-visual"><img src="./assets/pearl-necklace.svg" alt="奶油色背景上的珍珠项链示例插画"></div>
                   <div class="canvas-product-caption"><div><h3 id="canvas-product-name">春日珍珠项链</h3><p class="product-subtitle">温润珠光 · 轻盈日常</p></div><svg class="ui-icon" aria-hidden="true"><use href="#i-box"/></svg></div>
                   <div class="product-note"><svg class="ui-icon"><use href="#i-doc"/></svg><div><span>创作方向</span><p>“希望画面自然、干净，有春天的轻盈感，让商品成为视觉中心。”</p></div></div>
@@ -109,12 +103,12 @@
             <section class="workflow-node" data-workflow-node="1" data-scroll-region="agent" aria-labelledby="node-agent-title">
               <div class="workflow-node-rail"><span class="workflow-node-marker"><span>02</span></span></div>
               <div class="workflow-node-main">
-                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 02 · DISCOVERY</span><h2 id="node-agent-title">Agent 整理</h2><p>补充场景与方向，把商品信息转成创作简报</p></div><span class="node-state is-current"><i></i>进行中</span></header>
+                <header class="workflow-node-heading"><div><h2 id="node-agent-title">Agent 整理</h2></div><span class="node-state is-current"><i></i>进行中</span></header>
           <section class="panel agent-panel" aria-labelledby="agent-title">
-            <header class="panel-heading"><div class="heading-with-icon"><span class="panel-icon agent-icon"><svg class="ui-icon"><use href="#i-sparkle"/></svg></span><div><h2 id="agent-title">把灵感说得更具体</h2><p>Agent · 文字信息整理</p></div></div><span class="status-pill"><i></i>等待回答</span></header>
+            <header class="panel-heading"><div class="heading-with-icon"><span class="panel-icon agent-icon"><svg class="ui-icon"><use href="#i-sparkle"/></svg></span><div><h2 id="agent-title">整理创作方向</h2></div></div><span class="status-pill"><i></i>等待回答</span></header>
             <div class="agent-history-toolbar"><button class="text-button agent-history-trigger" type="button" data-open-agent-history><svg class="ui-icon"><use href="#i-clock"/></svg>运行历史</button></div>
             <div class="agent-body">
-              <div class="agent-greeting"><span class="agent-face" aria-hidden="true"><i></i><i></i><b></b></span><div><strong>已经有一个不错的开始。</strong><p>商品资料已整理好，再补充一个画面方向，<br class="wide-only">就可以生成第一版描述词。</p></div></div>
+              <div class="agent-greeting"><span class="agent-face" aria-hidden="true"><i></i><i></i><b></b></span><div><strong>商品资料已就绪</strong><p>补充场景后生成描述词。</p></div></div>
               <div class="question-box"><div class="question-meta"><span>补充创作方向</span><span>01 / 01</span></div><h3>你希望商品出现在什么场景里？</h3><p>选一个接近的方向，也可以写下自己的想法。</p><div class="scene-options"><button class="scene-option selected" type="button">自然窗边<svg class="ui-icon"><use href="#i-check"/></svg></button><button class="scene-option" type="button">纯色静物台</button><button class="scene-option" type="button">春日户外</button></div></div>
               <div class="reply-box"><textarea aria-label="补充场景描述" placeholder="例如：午后窗边，浅色亚麻布，柔和的自然光…"></textarea><button type="button" aria-label="提交场景描述"><svg class="ui-icon"><use href="#i-send"/></svg></button></div>
               <div class="agent-privacy"><svg class="ui-icon"><use href="#i-shield"/></svg>仅处理文字资料，不进行图片识别</div>
@@ -126,7 +120,7 @@
             <section class="workflow-node is-locked" id="node-a" data-workflow-node="2" data-step-name="a" data-scroll-region="detail" aria-labelledby="node-a-title">
               <div class="workflow-node-rail"><span class="workflow-node-marker"><span>03</span></span></div>
               <div class="workflow-node-main">
-                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 03 · CREATIVE BRIEF</span><h2 id="node-a-title">描述词 A</h2><p>确认商品事实、画面方向与约束</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="a" disabled>编辑节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
+                <header class="workflow-node-heading"><div><h2 id="node-a-title">描述词 A</h2><p>商品事实与画面方向</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="a" disabled>编辑节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
                 <div class="node-locked-state" data-node-gate="a"><svg class="ui-icon"><use href="#i-lock"/></svg><span>完成 Agent 整理后解锁</span></div>
                 <section class="workflow-detail" data-node-detail="a" hidden aria-live="polite"><div class="detail-header"><div><span class="detail-kicker">03 / 描述词 A</span><h3>确认创作简报</h3></div><button class="icon-button detail-close" type="button" data-detail-close="a" aria-label="收起描述词 A">×</button></div><div class="detail-content" data-step-content="a"></div></section>
               </div>
@@ -135,7 +129,7 @@
             <section class="workflow-node is-locked" data-workflow-node="3" data-step-name="b" data-scroll-region="detail" aria-labelledby="node-b-title">
               <div class="workflow-node-rail"><span class="workflow-node-marker"><span>04</span></span></div>
               <div class="workflow-node-main">
-                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 04 · IMAGE PROMPT</span><h2 id="node-b-title">提示词 B</h2><p>完善投递给各生图平台的执行指令</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="b" disabled>编辑节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
+                <header class="workflow-node-heading"><div><h2 id="node-b-title">提示词 B</h2><p>生图执行指令</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="b" disabled>编辑节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
                 <div class="node-locked-state" data-node-gate="b"><svg class="ui-icon"><use href="#i-lock"/></svg><span>确认描述词 A 后解锁</span></div>
                 <section class="workflow-detail" data-node-detail="b" hidden aria-live="polite"><div class="detail-header"><div><span class="detail-kicker">04 / 提示词 B</span><h3>完善生图提示词</h3></div><button class="icon-button detail-close" type="button" data-detail-close="b" aria-label="收起提示词 B">×</button></div><div class="detail-content" data-step-content="b"></div></section>
               </div>
@@ -144,7 +138,7 @@
             <section class="workflow-node is-locked" data-workflow-node="4" data-step-name="c" data-scroll-region="detail" aria-labelledby="node-c-title">
               <div class="workflow-node-rail"><span class="workflow-node-marker"><span>05</span></span></div>
               <div class="workflow-node-main">
-                <header class="workflow-node-heading"><div><span class="workflow-node-eyebrow">STEP 05 · GENERATION</span><h2 id="node-c-title">多平台生成</h2><p>选择生成平台，挑选成片并归档到项目</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="c" disabled>打开节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
+                <header class="workflow-node-heading"><div><h2 id="node-c-title">多平台生成</h2><p>生成、挑选并归档</p></div><div class="workflow-node-actions"><span class="node-state is-pending">未开始</span><button class="node-edit-button" type="button" data-node-open="c" disabled>打开节点<svg class="ui-icon"><use href="#i-arrow"/></svg></button></div></header>
                 <div class="node-locked-state" data-node-gate="c"><svg class="ui-icon"><use href="#i-lock"/></svg><span>确认提示词 B 后解锁</span></div>
                 <section class="workflow-detail generation-detail" data-node-detail="c" hidden aria-live="polite"><div class="detail-header"><div><span class="detail-kicker">05 / 多平台生成</span><h3>生成并归档成片</h3></div><button class="icon-button detail-close" type="button" data-detail-close="c" aria-label="收起多平台生成">×</button></div><div class="detail-content" data-step-content="c"></div></section>
               </div>
@@ -153,14 +147,14 @@
           </section>
           <aside class="inspector-column" aria-label="素材与商品属性">
             <section class="panel inspector-panel" id="materials" aria-labelledby="product-title">
-              <header class="panel-heading inspector-heading"><div><h2 id="product-title">素材与属性</h2><p>商品事实作为创作依据</p></div></header>
+              <header class="panel-heading inspector-heading"><div><h2 id="product-title">素材与属性</h2></div></header>
               <section class="inspector-section" aria-labelledby="asset-title">
                 <header class="inspector-section-heading"><h3 id="asset-title">素材</h3><span>主图</span></header>
-                <div class="inspector-asset"><img src="./assets/pearl-necklace.svg" alt="珍珠项链商品素材"><div class="asset-copy"><strong>商品原图</strong><span>当前项目素材</span></div><button class="image-upload-button" type="button" aria-label="替换商品图片"><svg class="ui-icon"><use href="#i-image"/></svg><span>替换</span></button><input class="image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择商品图片"></div>
+                <div class="inspector-asset"><img src="./assets/pearl-necklace.svg" alt="珍珠项链商品素材"><div class="asset-copy"><strong>商品原图</strong></div><button class="image-upload-button" type="button" aria-label="替换商品图片"><svg class="ui-icon"><use href="#i-image"/></svg><span>替换</span></button><input class="image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择商品图片"></div>
               </section>
               <section class="inspector-section product-properties" aria-labelledby="properties-title">
                 <header class="inspector-section-heading"><h3 id="properties-title">商品属性</h3><button class="text-button" type="button">编辑<svg class="ui-icon"><use href="#i-edit"/></svg></button></header>
-                <div class="product-details"><span class="category-label">JEWELRY COLLECTION</span><h3>春日珍珠项链</h3><p class="product-subtitle">温润珠光 · 轻盈日常</p>
+                <div class="product-details"><h3>春日珍珠项链</h3><p class="product-subtitle">温润珠光 · 轻盈日常</p>
                   <dl class="product-facts"><div><dt>商品品类</dt><dd>珠宝配饰 / 项链</dd></div><div><dt>商品材质</dt><dd>淡水珍珠、金色金属配件</dd></div><div><dt>图片用途</dt><dd>春季上新 · 电商场景图</dd></div></dl>
                   <div class="keep-details"><span>需要保留</span><div><span>珍珠色泽</span><span>项链结构</span><span>吊坠形状</span></div></div>
                 </div>
@@ -168,14 +162,14 @@
             </section>
           </aside>
         </div>
-        <footer class="page-footer" id="prototype-note"><span>造图 studio <i>·</i> 留一点空间给灵感</span><span>界面预览 · 示例内容</span></footer>
+        <footer class="page-footer" id="prototype-note"><span>界面预览 · 示例内容</span></footer>
       </div>
     </main>
   </div>
   <div class="interaction-toast" role="status" aria-live="polite"></div>
   <dialog class="app-modal" id="app-modal" aria-labelledby="modal-title">
     <div class="modal-shell">
-      <header class="modal-header"><div><span class="detail-kicker">项目工具</span><h2 id="modal-title">编辑商品资料</h2></div><button class="icon-button modal-close" type="button" aria-label="关闭弹窗">×</button></header>
+      <header class="modal-header"><div><h2 id="modal-title">编辑商品资料</h2></div><button class="icon-button modal-close" type="button" aria-label="关闭弹窗">×</button></header>
       <div class="modal-body" id="modal-body"></div>
     </div>
   </dialog>
@@ -951,7 +945,7 @@
       };
       const renderProjectName = () => { document.querySelector('.breadcrumb strong').textContent = projectName; };
       const openProductEditor = () => {
-        openModal('编辑商品资料', `<p class="modal-note">商品事实会作为后续描述词和提示词的基础。</p><label class="modal-field">商品名称<input id="product-name" value="${escapeHtml(productState.name)}"></label><label class="modal-field">一句话卖点<input id="product-subtitle" value="${escapeHtml(productState.subtitle)}"></label><label class="modal-field">商品描述<textarea id="product-description">${escapeHtml(productState.description)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
+        openModal('编辑商品资料', `<label class="modal-field">商品名称<input id="product-name" value="${escapeHtml(productState.name)}"></label><label class="modal-field">一句话卖点<input id="product-subtitle" value="${escapeHtml(productState.subtitle)}"></label><label class="modal-field">商品描述<textarea id="product-description">${escapeHtml(productState.description)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
       };
       const saveProduct = () => {
         const nextProduct = {
@@ -1061,7 +1055,7 @@
       const templateCardMarkup = (template) => `<article class="template-card"><header class="template-card-header"><div><span class="template-kind">${escapeHtml(templateKindLabel(template.kind))}</span><h3>${escapeHtml(template.name)}</h3></div><span class="template-enabled${template.enabled ? '' : ' is-disabled'}">${template.enabled ? '已启用' : '已停用'}</span></header><dl class="template-card-meta"><div><dt>版本</dt><dd>v${escapeHtml(String(template.version || 1))}</dd></div><div><dt>来源</dt><dd>${escapeHtml(template.source || 'manual')}</dd></div></dl><p class="template-card-preview">${escapeHtml(templatePreviewText(template) || template.description || '暂无内容')}</p><footer class="template-card-actions"><button class="text-button" type="button" data-template-action="apply" data-template-id="${escapeHtml(template.templateId)}"${template.enabled ? '' : ' disabled'}>应用</button><button class="text-button" type="button" data-template-action="duplicate" data-template-id="${escapeHtml(template.templateId)}">复制</button><button class="text-button" type="button" data-template-action="toggle" data-template-id="${escapeHtml(template.templateId)}">${template.enabled ? '停用' : '启用'}</button></footer></article>`;
       const promptTemplatesMarkup = (notice = '') => {
         const cards = promptTemplates.length ? promptTemplates.map(templateCardMarkup).join('') : '<div class="template-empty"><strong>还没有提示词模板</strong><span>保存当前 A 或 B 版本后，这里会出现可复用的模板。</span></div>';
-        return `<div class="template-toolbar"><div><p class="modal-note">模板保存在当前项目中，可重复应用到描述词 A 或提示词 B。</p></div><div class="template-toolbar-actions"><button class="button button-secondary" type="button" data-template-action="save-current-a"${descriptionA ? '' : ' disabled'}>保存当前 A</button><button class="button button-primary" type="button" data-template-action="save-current-b"${promptB ? '' : ' disabled'}>保存当前 B</button></div></div>${notice ? `<p class="template-notice">${escapeHtml(notice)}</p>` : ''}<div class="template-grid">${cards}</div>`;
+        return `<div class="template-toolbar"><div><p class="modal-note">模板仅用于当前项目。</p></div><div class="template-toolbar-actions"><button class="button button-secondary" type="button" data-template-action="save-current-a"${descriptionA ? '' : ' disabled'}>保存当前 A</button><button class="button button-primary" type="button" data-template-action="save-current-b"${promptB ? '' : ' disabled'}>保存当前 B</button></div></div>${notice ? `<p class="template-notice">${escapeHtml(notice)}</p>` : ''}<div class="template-grid">${cards}</div>`;
       };
       const isTemplateView = (session) => modal.dataset.modalSession === String(session) && modalTitle.textContent === '提示词模板';
       const fetchPromptTemplates = async ({ session = modalSession } = {}) => {
@@ -1090,7 +1084,7 @@
         templateSaveKind = kind;
         const draft = templateSaveSource(kind);
         const content = typeof draft.content === 'string' ? draft.content : '';
-        openModal(`保存当前${kind === 'a' ? ' A' : ' B'}为模板`, `<p class="modal-note">保存后可在当前项目的提示词模板中重复使用。</p><label class="modal-field">模板名称<input id="template-name" value="${escapeHtml(draft.name)}" maxlength="120"></label><label class="modal-field">模板类型<select id="template-kind"><option value="category"${draft.kind === 'category' ? ' selected' : ''}>品类</option><option value="scene">场景</option><option value="composition"${draft.kind === 'composition' ? ' selected' : ''}>构图</option><option value="negative">负面约束</option></select></label><label class="modal-field">说明（可选）<input id="template-description" placeholder="补充这份模板的使用场景"></label><label class="modal-field">内容预览<textarea id="template-content" readonly>${escapeHtml(content)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-template">保存模板</button></div>`);
+        openModal(`保存当前${kind === 'a' ? ' A' : ' B'}为模板`, `<label class="modal-field">模板名称<input id="template-name" value="${escapeHtml(draft.name)}" maxlength="120"></label><label class="modal-field">模板类型<select id="template-kind"><option value="category"${draft.kind === 'category' ? ' selected' : ''}>品类</option><option value="scene">场景</option><option value="composition"${draft.kind === 'composition' ? ' selected' : ''}>构图</option><option value="negative">负面约束</option></select></label><label class="modal-field">说明（可选）<input id="template-description" placeholder="补充这份模板的使用场景"></label><label class="modal-field">内容预览<textarea id="template-content" readonly>${escapeHtml(content)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-template">保存模板</button></div>`);
       };
       const savePromptTemplate = async () => {
         const draft = templateSaveSource(templateSaveKind);
@@ -1364,8 +1358,8 @@
           nextButton.classList.remove('is-complete');
           nextButton.disabled = false;
           document.querySelector('.reply-box textarea').value = '';
-          document.querySelector('.agent-greeting strong').textContent = '已经有一个不错的开始。';
-          document.querySelector('.agent-greeting p').textContent = '商品资料已整理好，再补充一个画面方向，就可以生成第一版描述词。';
+          document.querySelector('.agent-greeting strong').textContent = '商品资料已就绪';
+          document.querySelector('.agent-greeting p').textContent = '补充场景后生成描述词。';
           setStatus('等待回答');
         }
         if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
@@ -1472,11 +1466,11 @@
         revealDetail(detail);
         node.classList.add('is-expanded');
         if (stepName === 'a') {
-          host.innerHTML = `<p>Agent 已经把商品事实和画面方向整理成一份简报，你可以在提交前调整文字。A 版可附加一张参考图；图片不会发送给文字 Agent，只会随确认后的创作输入保存并用于后续生图。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
-          host.innerHTML = `<p>把 A 版创作简报转换为可执行的生图指令，生成前仍可以手动补充。B 版由你确认后发送到所选平台。</p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
-          host.innerHTML = `<p class="generation-intro">选择一个或多个平台。每个平台独立检查登录和提交；单个平台失败不会影响其他平台。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '网页扩展' : '网页适配'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">不满意？重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p class="generation-intro">可多选；各平台独立运行。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
           renderPlatformOverridesEditor();
           renderPlatformStatuses();
@@ -2983,8 +2977,10 @@
           projectApiUrl = `/api/projects/${encodeURIComponent(projectId)}`;
           agentNote = saved.agentNote || '';
           serverUpdatedAt = saved.updatedAt || '';
-          if (saved.agentReply) document.querySelector('.agent-greeting strong').textContent = saved.agentReply;
-          if (saved.agentQuestion) document.querySelector('.agent-greeting p').textContent = saved.agentQuestion;
+          const isLegacyAgentGreeting = saved.agentReply === '已经有一个不错的开始。'
+            && String(saved.agentQuestion || '').replace(/\s+/g, '') === '商品资料已整理好，再补充一个画面方向，就可以生成第一版描述词。';
+          if (saved.agentReply) document.querySelector('.agent-greeting strong').textContent = isLegacyAgentGreeting ? '商品资料已就绪' : saved.agentReply;
+          if (saved.agentQuestion) document.querySelector('.agent-greeting p').textContent = isLegacyAgentGreeting ? '补充场景后生成描述词。' : saved.agentQuestion;
         }
         if (saved?.generated) {
           generated = true;
