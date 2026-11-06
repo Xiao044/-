@@ -191,6 +191,9 @@
       let projectSession = 0;
       let latestProjectImportRequestId = 0;
       let pendingImportedProjectReload = false;
+      let pendingSceneChange = null;
+      let activeAgentRequest = null;
+      let agentRequestSequence = 0;
       let toastTimer;
       let editingAgent = false;
       let interrupted = false;
@@ -418,24 +421,30 @@
         })().finally(() => { serverSyncQueue = null; });
         return serverSyncQueue;
       };
-      const ensureProjectOnServer = async () => {
-        const current = await fetch(projectApiUrl, { cache: 'no-store' });
+      const ensureProjectOnServer = async (routeUrl = projectApiUrl, snapshot = serializeProject(), isCurrent = () => true) => {
+        const current = await fetch(routeUrl, { cache: 'no-store' });
+        if (!isCurrent()) return;
         if (current.ok) return;
         if (current.status !== 404) throw new Error('项目暂时无法读取，请稍后重试');
-        const created = await fetch(projectApiUrl, {
+        const created = await fetch(routeUrl, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(serializeProject())
+          body: JSON.stringify(snapshot)
         });
-        if (!created.ok) throw new Error('项目未能保存到服务端，请稍后重试');
+        if (isCurrent() && !created.ok) throw new Error('项目未能保存到服务端，请稍后重试');
       };
       const restoreAgentRunsFromServer = async () => {
+        const routeUrl = projectApiUrl, session = projectSession, restoringProjectId = projectId;
+        const inputSignature = agentInputSignature(), restoringRunId = currentAgentRunId, restoringText = descriptionA;
         try {
-          const response = await fetch(`${projectApiUrl}/agent-runs`, { cache: 'no-store' });
+          const response = await fetch(`${routeUrl}/agent-runs`, { cache: 'no-store' });
           if (!response.ok) return;
           const payload = await response.json();
+          if (projectApiUrl !== routeUrl || projectSession !== session || projectId !== restoringProjectId
+            || agentInputSignature() !== inputSignature || currentAgentRunId !== restoringRunId || descriptionA !== restoringText) return;
           agentRunHistory = Array.isArray(payload.runs) ? payload.runs : [];
           latestAgentDraftVersion = Number(payload.latestDraftVersion) || 0;
+          if (!currentAgentRunId && !descriptionA) return;
           const currentRun = agentRunHistory.find((run) => run.runId === currentAgentRunId && run.output?.draft);
           const matchesCurrentDraft = (run) => run?.output?.draft && (!descriptionA || run.output.draft.rawText === descriptionA);
           const acceptedRun = agentRunHistory.find((run) => run.runId === payload.acceptedRunId && matchesCurrentDraft(run));
@@ -623,6 +632,9 @@
           if (!response.ok) throw new Error(payload.error || '项目导入失败');
           const importedState = payload.project && typeof payload.project === 'object' ? payload.project : importedProject;
           if (importedState.projectId !== activeProjectId) throw new Error('导入结果的项目 ID 与当前项目不匹配');
+          invalidateAgentRequest();
+          pendingSceneChange = null;
+          projectSession += 1;
           window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, projectId: activeProjectId }));
           projectId = activeProjectId;
           projectApiUrl = `/api/projects/${encodeURIComponent(activeProjectId)}`;
@@ -778,20 +790,43 @@
         statusPill.innerHTML = `<i></i>${label}`;
       };
 
-      const requestAgent = async (task) => {
-        const selectedScene = sceneOptions.find((option) => option.classList.contains('selected'))?.textContent.trim() || '';
-        await ensureProjectOnServer();
-        const response = await fetch(`${projectApiUrl}/agent-runs`, {
+      const selectedSceneName = () => sceneOptions.find((option) => option.classList.contains('selected'))?.textContent.trim() || '';
+      const agentInputSignature = () => JSON.stringify({ scene: selectedSceneName(), note: agentNote, product: productState });
+      const captureAgentRequest = (task) => ({
+        id: ++agentRequestSequence, task, projectId, routeUrl: projectApiUrl, session: projectSession,
+        inputSignature: agentInputSignature(),
+        body: JSON.stringify({ task, scene: selectedSceneName(), note: agentNote, product: productState }),
+        projectSnapshot: JSON.parse(JSON.stringify(serializeProject()))
+      });
+      const isAgentRequestCurrent = (request) => !request.cancelled && request.projectId === projectId && request.routeUrl === projectApiUrl
+        && request.session === projectSession && request.inputSignature === agentInputSignature();
+      const beginAgentRequest = (task) => {
+        if (activeAgentRequest) activeAgentRequest.cancelled = true;
+        const request = captureAgentRequest(task);
+        activeAgentRequest = request;
+        setAgentBusy(true);
+        return request;
+      };
+      const finishAgentRequest = (request) => {
+        if (activeAgentRequest !== request) return;
+        activeAgentRequest = null;
+        setAgentBusy(false);
+      };
+      const invalidateAgentRequest = () => {
+        if (activeAgentRequest) activeAgentRequest.cancelled = true;
+        activeAgentRequest = null;
+        setAgentBusy(false);
+      };
+      const requestAgent = async (task, request = captureAgentRequest(task)) => {
+        await ensureProjectOnServer(request.routeUrl, request.projectSnapshot, () => isAgentRequestCurrent(request));
+        if (!isAgentRequestCurrent(request)) return null;
+        const response = await fetch(`${request.routeUrl}/agent-runs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            task,
-            scene: selectedScene,
-            note: agentNote,
-            product: productState
-          })
+          body: request.body
         });
         const payload = await response.json().catch(() => ({}));
+        if (!isAgentRequestCurrent(request)) return null;
         if (payload.run) {
           agentRunHistory = [payload.run, ...agentRunHistory.filter((run) => run.runId !== payload.run.runId)].slice(0, 50);
           latestAgentDraftVersion = Math.max(latestAgentDraftVersion, Number(payload.run.output?.version) || 0);
@@ -802,25 +837,61 @@
       };
 
       const setAgentBusy = (busy) => {
+        busy = Boolean(busy || activeAgentRequest);
         agentBusy = busy;
+        sceneOptions.forEach((option) => { option.disabled = busy; });
+        const replyButton = document.querySelector('.reply-box button');
+        if (replyButton) {
+          replyButton.disabled = busy;
+          replyButton.classList.toggle('is-loading', busy && activeAgentRequest?.task === 'follow_up');
+        }
         nextButton.disabled = busy || interrupted;
         nextButton.classList.toggle('is-loading', busy);
         nextButton.innerHTML = busy
-          ? 'DeepSeek 整理中<span class="button-spinner" aria-hidden="true"></span>'
+          ? `${activeAgentRequest?.task === 'restore_a' ? '正在恢复 A 版' : 'DeepSeek 整理中'}<span class="button-spinner" aria-hidden="true"></span>`
           : (generated && !editingAgent ? '描述词 A 已生成<svg class="ui-icon"><use href="#i-check"></use></svg>' : `${generated ? '重新生成' : '生成'}描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg>`);
       };
 
-      sceneOptions.forEach((option) => {
-        option.addEventListener('click', () => {
-          if (interrupted) return;
-          sceneOptions.forEach((item) => {
-            item.classList.toggle('selected', item === option);
-            item.setAttribute('aria-pressed', item === option ? 'true' : 'false');
-          });
-          setStatus('等待回答');
-          persistState();
-          showToast(`已选择「${option.textContent.trim()}」`);
+      const hasSceneDownstream = () => progress > 1 || generated || Boolean(descriptionA || promptB || negativePrompt
+        || currentAgentRunId || descriptionADraft || Object.keys(descriptionAStructured).length || Object.keys(descriptionAFieldEdits).length
+        || generationJobId || generationResendSourceJobId || resultGenerated || resultSelected >= 0 || generatedResults.length);
+      const applySceneSelection = (option) => {
+        if (interrupted || agentBusy || !sceneOptions.includes(option) || option.classList.contains('selected')) return;
+        const savedNote = agentNote;
+        const noteInput = document.querySelector('.reply-box textarea');
+        const editingNote = noteInput.value;
+        const reset = hasSceneDownstream();
+        sceneOptions.forEach((item) => {
+          item.classList.toggle('selected', item === option);
+          item.setAttribute('aria-pressed', item === option ? 'true' : 'false');
         });
+        if (reset) {
+          resetDownstream(0);
+          generationResendSourceJobId = '';
+          agentNote = savedNote;
+          noteInput.value = editingNote;
+        }
+        setStatus('等待回答');
+        persistState();
+        syncProject(true);
+        showToast(`已选择「${option.textContent.trim()}」，已保存到本地`);
+      };
+      const selectScene = (option) => {
+        if (interrupted || agentBusy || pendingSceneChange || !sceneOptions.includes(option) || option.classList.contains('selected')) return;
+        if (!hasSceneDownstream()) { applySceneSelection(option); return; }
+        const fromScene = selectedSceneName();
+        openModal('切换场景', `<p class="modal-note">从「${escapeHtml(fromScene)}」切换到「${escapeHtml(option.textContent.trim())}」后，当前描述词 A、提示词 B 和生成结果需要重新生成。历史版本、任务记录和归档资产会保留。</p><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="confirm-scene-change">确认切换</button></div>`);
+        pendingSceneChange = { option, fromScene, projectId, routeUrl: projectApiUrl, session: projectSession, modalSession };
+      };
+      const confirmSceneChange = () => {
+        const pending = pendingSceneChange;
+        if (!pending || pending.projectId !== projectId || pending.routeUrl !== projectApiUrl || pending.session !== projectSession
+          || pending.modalSession !== modalSession || pending.fromScene !== selectedSceneName() || agentBusy || interrupted) return;
+        closeModal();
+        applySceneSelection(pending.option);
+      };
+      sceneOptions.forEach((option) => {
+        option.addEventListener('click', () => selectScene(option));
         option.setAttribute('aria-pressed', option.classList.contains('selected') ? 'true' : 'false');
       });
 
@@ -829,8 +900,8 @@
         interruptButton.classList.toggle('is-resume', interrupted);
         interruptButton.innerHTML = `<span aria-hidden="true"></span>${interrupted ? '继续节点' : '中断节点'}`;
         currentStep.classList.toggle('paused', interrupted);
-        nextButton.disabled = interrupted;
-        nextButton.setAttribute('aria-disabled', interrupted ? 'true' : 'false');
+        nextButton.disabled = interrupted || agentBusy;
+        nextButton.setAttribute('aria-disabled', interrupted || agentBusy ? 'true' : 'false');
         if (interrupted) {
           setStatus('已中断', 'is-interrupted');
           currentStepLabel.innerHTML = '<i></i>已中断';
@@ -844,11 +915,12 @@
       });
 
       nextButton.addEventListener('click', () => {
-        if (interrupted || (generated && !editingAgent) || agentBusy) return;
+        if (interrupted || (generated && !editingAgent) || agentBusy || pendingSceneChange) return;
         const wasGenerated = generated;
-        setAgentBusy(true);
+        const request = beginAgentRequest('description_a');
         setStatus('正在请求 DeepSeek', 'is-ready');
-        requestAgent('description_a').then((payload) => {
+        requestAgent('description_a', request).then((payload) => {
+          if (activeAgentRequest !== request || !isAgentRequestCurrent(request) || !payload) return;
           const nextDescription = String(payload.descriptionA || '').trim();
           if (!nextDescription) throw new Error('DeepSeek 没有返回描述词 A');
           const descriptionChanged = wasGenerated && nextDescription !== descriptionA;
@@ -889,13 +961,11 @@
             ? `A 版已生成，有 ${factWarningCount} 项商品事实需要核对`
             : (descriptionChanged ? '描述词 A 已更新，下游内容需要重新确认' : 'DeepSeek 已生成描述词 A'));
         }).catch((error) => {
+          if (activeAgentRequest !== request || !isAgentRequestCurrent(request)) return;
           setStatus('AI 请求失败', 'is-interrupted');
           showToast(error.message || 'DeepSeek 暂时不可用');
         }).finally(() => {
-          if (!generated) {
-            setAgentBusy(false, '生成描述词 A');
-            nextButton.innerHTML = '生成描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg>';
-          }
+          finishAgentRequest(request);
         });
       });
 
@@ -913,7 +983,7 @@
       });
 
       document.querySelector('.reply-box button').addEventListener('click', () => {
-        if (interrupted || agentBusy) return;
+        if (interrupted || agentBusy || pendingSceneChange) return;
         const input = document.querySelector('.reply-box textarea');
         agentNote = input.value.trim();
         if (!agentNote) {
@@ -921,11 +991,10 @@
           input.focus();
           return;
         }
-        const submitButton = document.querySelector('.reply-box button');
-        submitButton.disabled = true;
-        submitButton.classList.add('is-loading');
+        const request = beginAgentRequest('follow_up');
         setStatus('正在请求 DeepSeek', 'is-ready');
-        requestAgent('follow_up').then((payload) => {
+        requestAgent('follow_up', request).then((payload) => {
+          if (activeAgentRequest !== request || !isAgentRequestCurrent(request) || !payload) return;
           const reply = payload.reply || '已收到你的补充。';
           const question = payload.followUpQuestion || '';
           document.querySelector('.agent-greeting strong').textContent = reply;
@@ -935,11 +1004,11 @@
           syncProject();
           showToast(question || 'DeepSeek 已收到补充');
         }).catch((error) => {
+          if (activeAgentRequest !== request || !isAgentRequestCurrent(request)) return;
           setStatus('AI 请求失败', 'is-interrupted');
           showToast(error.message || 'DeepSeek 暂时不可用');
         }).finally(() => {
-          submitButton.disabled = false;
-          submitButton.classList.remove('is-loading');
+          finishAgentRequest(request);
         });
       });
 
@@ -954,6 +1023,7 @@
       const modalBody = document.querySelector('#modal-body');
       let modalSession = 0;
       const openModal = (title, content, { wide = false } = {}) => {
+        pendingSceneChange = null;
         modalSession += 1;
         modal.dataset.modalSession = String(modalSession);
         modalTitle.textContent = title;
@@ -963,6 +1033,7 @@
         else modal.setAttribute('open', '');
       };
       const closeModal = () => {
+        pendingSceneChange = null;
         modalSession += 1;
         modal.dataset.modalSession = String(modalSession);
         if (typeof modal.close === 'function') modal.close();
@@ -1306,6 +1377,8 @@
         openModal('新建项目', '<p class="modal-note">新项目会从空白的商品资料和第一步场景开始。</p><label class="modal-field">项目名称<input id="new-project-name" placeholder="例如：夏日新品系列"></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="create-project">创建项目</button></div>');
       };
       const createProject = async () => {
+        invalidateAgentRequest();
+        pendingSceneChange = null;
         projectName = document.querySelector('#new-project-name')?.value.trim() || '未命名商品项目';
         const projectSlug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'project';
         projectSession += 1;
@@ -1427,6 +1500,7 @@
       const resetDownstream = (stepIndex) => {
         progress = stepIndex + 1;
         if (stepIndex === 0) {
+          invalidateAgentRequest();
           generated = false;
           editingAgent = false;
           interrupted = false;
@@ -1870,15 +1944,24 @@
         modalBody.innerHTML = agentHistoryMarkup(agentRunHistory, selectedAgentHistoryRunId);
       };
       const restoreAgentRun = async (runId) => {
+        if (agentBusy || pendingSceneChange) { showToast('请先完成当前 Agent 请求或场景确认'); return; }
         const restoreButton = modalBody.querySelector(`[data-agent-run-restore="${CSS.escape(runId)}"]`);
         const sourceRun = agentRunHistory.find((run) => run.runId === runId);
         if (!sourceRun || sourceRun.task !== 'description_a' || sourceRun.status !== 'completed' || !sourceRun.output?.draft) return;
         if ((progress > 2 || descriptionA) && !window.confirm('恢复会新建一个 A 版草稿，并清除当前 A 版之后的提示词和生成结果。原历史记录会保留。是否继续？')) return;
+        const request = beginAgentRequest('restore_a');
+        const restoringModalSession = modalSession;
+        const draftSnapshot = () => JSON.stringify({ descriptionA, descriptionAStructured, descriptionADraft, descriptionAFieldEdits, currentAgentRunId, currentAgentRunVersion });
+        const restoringDraft = draftSnapshot();
+        const isRestoreContextCurrent = () => activeAgentRequest === request && isAgentRequestCurrent(request) && modalSession === restoringModalSession;
+        const isCurrentRestore = () => isRestoreContextCurrent() && restoringDraft === draftSnapshot();
         if (restoreButton) { restoreButton.disabled = true; restoreButton.textContent = '正在恢复'; }
         try {
-          await ensureProjectOnServer();
-          const response = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' });
+          await ensureProjectOnServer(request.routeUrl, request.projectSnapshot, isCurrentRestore);
+          if (!isCurrentRestore()) return;
+          const response = await fetch(`${request.routeUrl}/agent-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' });
           const payload = await response.json().catch(() => ({}));
+          if (!isCurrentRestore()) return;
           if (!response.ok || !payload.run) throw new Error(payload.error || '历史草稿恢复失败');
           const restoredRun = payload.run;
           if (progress > 2) resetDownstream(1);
@@ -1894,20 +1977,24 @@
           generated = true;
           editingAgent = false;
           progress = 2;
-          setAgentBusy(false);
           markStepComplete(1);
           setCurrentStep(2, '确认创作简报');
           unlockCard('a');
           setStatus('恢复的 A 版待确认', 'is-ready');
           nextButton.classList.add('is-complete');
+          const appliedDraft = draftSnapshot();
           persistState();
           await syncProject();
+          if (!isRestoreContextCurrent() || appliedDraft !== draftSnapshot()) return;
           closeModal();
           openDetail('a');
           showToast('已恢复为新草稿，原历史记录保留');
         } catch (error) {
+          if (!isRestoreContextCurrent()) return;
           if (restoreButton?.isConnected) { restoreButton.disabled = false; restoreButton.textContent = '恢复为新草稿'; }
           showToast(error.message || '历史草稿恢复失败');
+        } finally {
+          finishAgentRequest(request);
         }
       };
       const assetLibraryFilters = { search: '', status: '', platform: '', favorite: '', tag: '', qualityLabel: '', promptVersion: '', jobId: '', attemptId: '', createdFrom: '', createdTo: '', includeDeleted: '' };
@@ -2634,9 +2721,8 @@
         if (index === 0) openProductEditor();
         if (index === 1) {
           editingAgent = generated;
-          nextButton.disabled = interrupted;
-          setAgentBusy(false);
-          showToast(generated ? '已回到 Agent，可调整方向后重新生成' : '已回到 Agent 整理');
+          setAgentBusy(Boolean(activeAgentRequest));
+          showToast(agentBusy ? 'Agent 请求进行中，请稍候' : (generated ? '已回到 Agent，可调整方向后重新生成' : '已回到 Agent 整理'));
         }
         if (index === 2 && progress >= 2) openDetail('a');
         if (index === 3 && progress >= 3) openDetail('b');
@@ -2921,6 +3007,7 @@
         const action = event.target.closest('[data-modal-action]')?.dataset.modalAction;
         if (action === 'cancel') closeModal();
         if (action === 'save-product') saveProduct();
+        if (action === 'confirm-scene-change') confirmSceneChange();
         if (action === 'create-project') createProject();
         if (action === 'save-template') savePromptTemplate();
         if (action === 'apply-template') applyPromptTemplate().catch((error) => showToast(error.message || '模板应用失败'));

@@ -71,7 +71,7 @@ const makeProductContext = () => {
     resultGenerated: true, resultSelected: 0, generatedResults: [{ url: '/data/uploads/test/result.png' }],
     invalidatedGenerationJobs: new Set(), doubaoBridgeState: 'completed', generationJobId: 'job-1', generationResendSourceJobId: '',
     selectedGenerationPlatforms: new Set(['doubao']), versions: [], projectName: '测试项目', projectId: 'test', agentNote: '',
-    storageKey: 'product-save-test', projectApiUrl: '/api/projects/test', serverUpdatedAt: '', serverSyncQueue: null, pendingProjectSync: null,
+    storageKey: 'product-save-test', projectApiUrl: '/api/projects/test', projectSession: 0, agentRequestSequence: 0, serverUpdatedAt: '', serverSyncQueue: null, pendingProjectSync: null,
     agentRunHistory: [], latestAgentDraftVersion: 0,
     sceneOptions: [{ textContent: '自然窗边', classList: { contains: () => true } }],
     window: {
@@ -93,7 +93,8 @@ const makeProductContext = () => {
   };
   vm.createContext(context);
   const productHelpers = ['productFieldDefinitions', 'productFieldError', 'showProductFieldError', 'readProductEditor', 'refreshProductFieldValidation'].filter((name) => source.includes(`      const ${name} =`));
-  vm.runInContext([...productHelpers.map(declaration), ...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'requestAgent', 'openProductEditor', 'saveProduct'].map(declaration), 'globalThis.ui = { saveProduct, requestAgent, serializeProject, openProductEditor };'].join('\n'), context);
+  const agentHelpers = ['selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent'];
+  vm.runInContext([...productHelpers.map(declaration), ...agentHelpers.map(declaration), ...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'requestAgent', 'openProductEditor', 'saveProduct'].map(declaration), 'globalThis.ui = { saveProduct, requestAgent, serializeProject, openProductEditor };'].join('\n'), context);
   return { context, product, inputs, errors, calls, requests, storage };
 };
 
