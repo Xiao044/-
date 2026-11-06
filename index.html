@@ -202,6 +202,9 @@
       let generated = false;
       let progress = 1;
       let descriptionA = '';
+      let acceptedASnapshot;
+      let activeAOperation = null;
+      let pendingAConfirmation = null;
       let descriptionAStructured = {};
       let agentWarnings = [];
       let descriptionADraft = null;
@@ -338,6 +341,7 @@
             generated,
             progress,
             descriptionA,
+            acceptedASnapshot,
             descriptionAStructured,
             agentWarnings,
             descriptionADraft,
@@ -380,7 +384,7 @@
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
           projectId, selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
-          descriptionA, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
+          descriptionA, acceptedASnapshot, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
           promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion },
           descriptionAStructured,
@@ -401,6 +405,10 @@
         };
       };
       const syncProject = (showFeedback = false) => {
+        if (activeAOperation) {
+          if (showFeedback) showToast('A 版正在保存或确认，请完成后再保存项目');
+          return Promise.resolve(false);
+        }
         const nextRequest = { routeUrl: projectApiUrl, body: JSON.stringify(serializeProject()), showFeedback: Boolean(showFeedback) };
         pendingProjectSync = pendingProjectSync
           ? { ...nextRequest, showFeedback: pendingProjectSync.showFeedback || nextRequest.showFeedback }
@@ -437,14 +445,19 @@
       };
       const restoreAgentRunsFromServer = async () => {
         const routeUrl = projectApiUrl, session = projectSession, restoringProjectId = projectId;
+        const restoringAOperation = activeAOperation;
+        const restoringAEdits = JSON.stringify(descriptionAFieldEdits);
         const inputSignature = agentInputSignature(), restoringRunId = currentAgentRunId, restoringText = descriptionA;
         try {
           const response = await fetch(`${routeUrl}/agent-runs`, { cache: 'no-store' });
           if (!response.ok) return;
           const payload = await response.json();
           if (projectApiUrl !== routeUrl || projectSession !== session || projectId !== restoringProjectId
+            || activeAOperation !== restoringAOperation || activeAOperation || JSON.stringify(descriptionAFieldEdits) !== restoringAEdits
             || agentInputSignature() !== inputSignature || currentAgentRunId !== restoringRunId || descriptionA !== restoringText) return;
           agentRunHistory = Array.isArray(payload.runs) ? payload.runs : [];
+          resolveAcceptedASnapshot();
+          refreshAConfirmationState();
           latestAgentDraftVersion = Number(payload.latestDraftVersion) || 0;
           if (!currentAgentRunId && !descriptionA) return;
           const currentRun = agentRunHistory.find((run) => run.runId === currentAgentRunId && run.output?.draft);
@@ -463,6 +476,7 @@
         } catch (error) { /* Existing project state remains usable offline. */ }
       };
       const uploadProductImage = async (file) => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
         if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
         const shouldResetDownstream = progress > 1;
@@ -492,6 +506,7 @@
         } finally { URL.revokeObjectURL(previewUrl); }
       };
       const uploadABriefImage = async (file) => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
         if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
         if (progress > 2) {
@@ -603,6 +618,7 @@
         window.location.reload();
       };
       const importProjectFromFile = async (file) => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         if (!file) return;
         const activeProjectId = projectId;
         const importRouteUrl = projectApiUrl;
@@ -867,9 +883,12 @@
       };
       const invalidateAgentRequest = () => {
         clearAgentFailure();
+        activeAOperation = null;
+        pendingAConfirmation = null;
         if (activeAgentRequest) activeAgentRequest.cancelled = true;
         activeAgentRequest = null;
         setAgentBusy(false);
+        refreshAConfirmationState();
       };
       const requestAgent = async (task, request = captureAgentRequest(task)) => {
         await ensureProjectOnServer(request.routeUrl, request.projectSnapshot, () => isAgentRequestCurrent(request));
@@ -891,7 +910,7 @@
       };
 
       const setAgentBusy = (busy) => {
-        busy = Boolean(busy || activeAgentRequest);
+        busy = Boolean(busy || activeAgentRequest || activeAOperation);
         agentBusy = busy;
         sceneOptions.forEach((option) => { option.disabled = busy; });
         const replyButton = document.querySelector('.reply-box button');
@@ -989,6 +1008,7 @@
             }
             resetDownstream(1);
           }
+          resolveAcceptedASnapshot();
           descriptionA = nextDescription;
           descriptionAStructured = payload.descriptionAStructured && typeof payload.descriptionAStructured === 'object' ? payload.descriptionAStructured : {};
           agentWarnings = Array.isArray(payload.warnings) ? payload.warnings : [];
@@ -1098,6 +1118,8 @@
         else modal.setAttribute('open', '');
       };
       const closeModal = () => {
+        pendingAConfirmation = null;
+        refreshAConfirmationState();
         pendingSceneChange = null;
         modalSession += 1;
         modal.dataset.modalSession = String(modalSession);
@@ -1163,6 +1185,7 @@
         openModal('编辑商品资料', `${fields}<div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
       };
       const saveProduct = () => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         const values = readProductEditor();
         if (!values) return;
         const nextProduct = {
@@ -1192,6 +1215,7 @@
         return snapshot;
       };
       const saveVersion = async () => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         const snapshot = versionSnapshot();
         try {
           const response = await fetch(`${projectApiUrl}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ snapshot }) });
@@ -1340,10 +1364,12 @@
         openModal('应用提示词模板', templateApplyPreviewMarkup(template), { wide: true });
       };
       const applyPromptTemplate = async () => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         const template = templateApplyCandidate;
         if (!template) return;
         const proposed = templateApplyFields(template);
         if (proposed.mode === 'b') {
+          if (!guardAConfirmation()) return;
           if (progress < 3) { showToast('请先确认描述词 A，再应用提示词 B 模板'); return; }
           const changed = Boolean(promptB && (proposed.positivePrompt !== promptB || proposed.negativePrompt !== negativePrompt || proposed.aspectRatio !== aspectRatio || JSON.stringify(proposed.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(proposed.platformOverrides) !== JSON.stringify(platformOverrides)));
           if (changed && progress > 4) {
@@ -1373,6 +1399,7 @@
           showToast('提示词 B 模板已应用');
           return;
         }
+        resolveAcceptedASnapshot();
         const nextDescription = String(proposed.descriptionA || '').trim();
         if (!nextDescription) { showToast('A 模板没有可应用的描述词'); return; }
         const changed = nextDescription !== descriptionA || JSON.stringify(proposed.fields || {}) !== JSON.stringify(descriptionAStructured || {});
@@ -1425,6 +1452,7 @@
         } catch (error) { showToast(error.message || '模板操作失败'); }
       };
       const restoreVersion = async (record) => {
+        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
         if (!record) return;
         if (record.versionId && !record.versionId.startsWith('local-')) {
           const response = await fetch(`${projectApiUrl}/versions/${encodeURIComponent(record.versionId)}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -1445,6 +1473,7 @@
       const createProject = async () => {
         invalidateAgentRequest();
         pendingSceneChange = null;
+        acceptedASnapshot = null;
         projectName = document.querySelector('#new-project-name')?.value.trim() || '未命名商品项目';
         const projectSlug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'project';
         projectSession += 1;
@@ -1582,7 +1611,7 @@
           document.querySelector('.agent-greeting p').textContent = '补充场景后生成描述词。';
           setStatus('等待回答');
         }
-        if (stepIndex < 2) { descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
+        if (stepIndex < 2) { acceptedASnapshot = null; descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
         if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; promptBTemplateId = ''; promptBTemplateVersion = 0; commitPlatformOverrides(); }
         if (stepIndex < 4) {
           resultGenerated = false;
@@ -1686,16 +1715,17 @@
         revealDetail(detail);
         node.classList.add('is-expanded');
         if (stepName === 'a') {
-          host.innerHTML = `<p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
-          host.innerHTML = `<label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
-          host.innerHTML = `<p class="generation-intro">可多选；各平台独立运行。当前四个平台均未验收，支持手动导入。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '未验收' : '实验性 · 未验收'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p class="generation-intro">可多选；各平台独立运行。当前四个平台均未验收，支持手动导入。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '未验收' : '实验性 · 未验收'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
           renderPlatformOverridesEditor();
           renderPlatformStatuses();
           if (resultGenerated) renderResults();
         }
+        refreshAConfirmationState();
         if (shouldScroll) {
           const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
           node.scrollIntoView({ behavior: scrollBehavior, block: 'start' });
@@ -2309,6 +2339,9 @@
         persistState();
       };
       const handleTaskAction = async (action, jobId, platform = '') => {
+        if (action === 'retry' && !guardAConfirmation()) return;
+        const sending = action === 'retry' ? captureASendingContext() : null;
+        const isCurrentRetry = () => !sending || isASendingContextCurrent(sending);
         if (action === 'refresh') { openTaskCenter(jobId); return; }
         const endpoint = platform
           ? `${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}/platforms/${encodeURIComponent(platform)}/${action}`
@@ -2316,13 +2349,18 @@
         try {
           let actionBody = {};
           if (platform) {
-            const selectedTask = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+            const selectedTask = await fetch(`${sending?.routeUrl || projectApiUrl}/generation-jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+            if (!isCurrentRetry()) return;
             const selectedPayload = await selectedTask.json().catch(() => ({}));
+            if (!isCurrentRetry()) return;
             const entry = selectedPayload.job?.platforms?.[platform];
             actionBody = { jobId, platform, attemptId: entry?.attemptId || '' };
           }
+          if (!isCurrentRetry()) return;
           const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actionBody) });
+          if (!isCurrentRetry()) return;
           const payload = await response.json().catch(() => ({}));
+          if (!isCurrentRetry()) return;
           if (!response.ok) throw new Error(payload.error || '任务操作失败');
           if (payload.job) {
             hydrateGenerationJob(payload.job);
@@ -2341,12 +2379,113 @@
           }
           showToast(action === 'retry' ? `${taskPlatformLabels[platform] || platform} 已重新排队` : '任务状态已更新');
           openTaskCenter(jobId);
-        } catch (error) { showToast(error.message || '任务操作失败'); }
+        } catch (error) { if (isCurrentRetry()) showToast(error.message || '任务操作失败'); }
+      };
+      const normalizeAContent = (draft = {}, structured = {}) => ({
+        rawText: String(draft.rawText ?? '').trim(),
+        fields: Object.fromEntries(agentDraftFieldDefinitions.map((definition) => {
+          const field = draft.fields?.[definition.key] ?? structured[definition.key] ?? (definition.key === 'productFactsSummary' ? structured.subject : undefined);
+          const value = field && typeof field === 'object' && Object.prototype.hasOwnProperty.call(field, 'value') ? field.value : field;
+          return [definition.key, definition.array
+            ? (Array.isArray(value) ? value : String(value ?? '').split(/\r?\n|[，,；;]/)).map((item) => String(item).trim()).filter(Boolean)
+            : String(value ?? '').trim()];
+        }))
+      });
+      const storedAContent = () => normalizeAContent({ rawText: descriptionA, fields: descriptionADraft?.fields }, descriptionAStructured);
+      const editorAContent = () => {
+        const stored = storedAContent();
+        const raw = detailContents.a.querySelector('#description-editor');
+        if (raw) stored.rawText = raw.value.trim();
+        for (const definition of agentDraftFieldDefinitions) {
+          const input = detailContents.a.querySelector(`[data-agent-field="${definition.key}"]`);
+          if (input) stored.fields[definition.key] = parseDraftFieldInput(definition, input.value);
+          else if (Object.prototype.hasOwnProperty.call(descriptionAFieldEdits, definition.key)) stored.fields[definition.key] = parseDraftFieldInput(definition, descriptionAFieldEdits[definition.key]);
+        }
+        return stored;
+      };
+      const resolveAcceptedASnapshot = () => {
+        if (acceptedASnapshot !== undefined) return acceptedASnapshot;
+        if (currentAgentRunId) {
+          const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
+          if (!run) return null;
+          const accepted = run.accepted ? run : [...(run.revisions || [])].reverse().find((revision) => revision.accepted && revision.output?.draft);
+          acceptedASnapshot = accepted?.output?.draft ? normalizeAContent(accepted.output.draft, accepted.output.descriptionAStructured) : null;
+        } else acceptedASnapshot = progress >= 3 && descriptionA ? storedAContent() : null;
+        return acceptedASnapshot;
+      };
+      const hasADownstream = () => progress > 3 || Boolean(promptB || generationJobId || resultGenerated || generatedResults.length);
+      const isAConfirmationPending = () => {
+        const baseline = resolveAcceptedASnapshot();
+        return !baseline || JSON.stringify(editorAContent()) !== JSON.stringify(baseline);
+      };
+      const refreshAConfirmationState = () => {
+        const pending = isAConfirmationPending();
+        document.querySelectorAll('[data-a-confirmation-state]').forEach((notice) => {
+          notice.hidden = !pending;
+          notice.textContent = 'A 版有待确认内容。旧提示词 B 和结果已保留，确认 A 后才可继续发送。';
+        });
+        document.querySelectorAll('[data-detail-action="confirm-b"], [data-detail-action="resend-b"], [data-detail-action="generate"], [data-detail-action="regenerate-results"]').forEach((button) => {
+          if (pending || activeAOperation || pendingAConfirmation) {
+            if (!Object.prototype.hasOwnProperty.call(button.dataset, 'aConfirmationDisabled')) button.dataset.aConfirmationDisabled = String(button.disabled);
+            button.disabled = true;
+          } else if (Object.prototype.hasOwnProperty.call(button.dataset, 'aConfirmationDisabled')) {
+            button.disabled = button.dataset.aConfirmationDisabled === 'true';
+            delete button.dataset.aConfirmationDisabled;
+          }
+        });
+        for (const input of [detailContents.a.querySelector('#description-editor'), ...agentDraftFieldDefinitions.map((definition) => detailContents.a.querySelector(`[data-agent-field="${definition.key}"]`))]) {
+          if (input) input.readOnly = Boolean(activeAOperation?.committing);
+        }
+        for (const action of ['save-brief', 'confirm-a', 'regenerate-a']) {
+          const button = detailContents.a.querySelector(`[data-detail-action="${action}"]`);
+          if (button) button.disabled = Boolean(activeAOperation || pendingAConfirmation || agentBusy || interrupted);
+        }
+      };
+      const guardAConfirmation = () => {
+        if (!activeAOperation && !pendingAConfirmation && !isAConfirmationPending()) return true;
+        refreshAConfirmationState();
+        showToast('请先确认 A 版，再确认或发送提示词 B');
+        return false;
+      };
+      const captureASendingContext = () => ({ projectId, routeUrl: projectApiUrl, session: projectSession,
+        content: JSON.stringify(editorAContent()), baseline: JSON.stringify(resolveAcceptedASnapshot()) });
+      const isASendingContextCurrent = (sending) => sending.projectId === projectId && sending.routeUrl === projectApiUrl
+        && sending.session === projectSession && !activeAOperation && !pendingAConfirmation && !isAConfirmationPending()
+        && sending.content === JSON.stringify(editorAContent()) && sending.baseline === JSON.stringify(resolveAcceptedASnapshot());
+      const captureAOperation = () => ({ projectId, routeUrl: projectApiUrl, session: projectSession, runId: currentAgentRunId,
+        inputSignature: agentInputSignature(), content: editorAContent(), collected: collectAgentDraftPatch() });
+      const isAOperationCurrent = (operation) => activeAOperation === operation && operation.projectId === projectId
+        && operation.routeUrl === projectApiUrl && operation.session === projectSession && operation.runId === currentAgentRunId
+        && operation.inputSignature === agentInputSignature() && JSON.stringify(operation.content) === JSON.stringify(editorAContent());
+      const setAOperation = (operation) => {
+        activeAOperation = operation;
+        setAgentBusy(Boolean(operation));
+        refreshAConfirmationState();
+      };
+      const strictAProjectSave = async (operation, project) => {
+        await serverSyncQueue;
+        if (!isAOperationCurrent(operation)) return false;
+        const response = await fetch(operation.routeUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(project) });
+        if (!isAOperationCurrent(operation)) return false;
+        if (!response.ok) throw new Error('项目未能保存，已有提示词和结果已保留，请重试');
+        return true;
+      };
+      const confirmedAProject = (content, clearDownstream) => {
+        const next = { ...serializeProject(), acceptedASnapshot: content };
+        if (clearDownstream) Object.assign(next, {
+          progress: 3, promptB: '', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
+          promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
+          promptBExecution: { positive_prompt: '', negative_prompt: '', aspect_ratio: '4:5', platform_params: {}, platform_overrides: {}, source: 'workbench', version: 1, templateId: '', templateVersion: 0 },
+          resultGenerated: false, resultSelected: -1, generatedResults: [], generationJobId: '', generationResendSourceJobId: '', doubaoBridgeState: 'idle',
+          invalidatedGenerationJobs: [...new Set([...invalidatedGenerationJobs, ...(generationJobId ? [generationJobId] : [])])].slice(-20)
+        });
+        else next.progress = Math.max(progress, 3);
+        return next;
       };
       const collectAgentDraftPatch = () => {
         const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
         const baseDraft = run?.output?.draft || descriptionADraft || {};
-        const nextDescription = detailContents.a.querySelector('#description-editor')?.value.trim() || '';
+        const nextDescription = detailContents.a.querySelector('#description-editor')?.value.trim() ?? descriptionA;
         const patch = {};
         if (nextDescription !== String(baseDraft.rawText || descriptionA || '').trim()) patch.rawText = nextDescription;
         const fields = {};
@@ -2366,22 +2505,22 @@
         if (Object.keys(fields).length) patch.fields = fields;
         return { run, nextDescription, patch, changed: Boolean(patch.rawText !== undefined || patch.fields) };
       };
-      const saveAgentDraftEdits = async ({ showFeedback = true } = {}) => {
-        const { run, nextDescription, patch, changed } = collectAgentDraftPatch();
+      const saveAgentDraftOperation = async (operation) => {
+        const { nextDescription, patch, changed } = operation.collected;
         if (!changed) {
           descriptionAFieldEdits = {};
           refreshSavedDraftFieldSources();
           persistState();
-          if (showFeedback) showToast('简报没有新的修改');
-          return { changed: false };
+          return true;
         }
-        if (currentAgentRunId) {
-          const response = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(currentAgentRunId)}`, {
+        if (operation.runId) {
+          const response = await fetch(`${operation.routeUrl}/agent-runs/${encodeURIComponent(operation.runId)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ draft: patch })
           });
           const payload = await response.json().catch(() => ({}));
+          if (!isAOperationCurrent(operation)) return false;
           if (!response.ok || !payload.run) throw new Error(payload.error || '简报修改保存失败');
           const savedRun = payload.run;
           agentRunHistory = [savedRun, ...agentRunHistory.filter((item) => item.runId !== savedRun.runId)].slice(0, 50);
@@ -2413,12 +2552,29 @@
             forbidden: fields.forbidden.value
           };
         }
+        if (!isAOperationCurrent(operation)) return false;
         descriptionAFieldEdits = {};
         refreshSavedDraftFieldSources();
         persistState();
-        await syncProject();
-        if (showFeedback) showToast('简报修改已保存');
-        return { changed: true, run };
+        return true;
+      };
+      const saveAgentDraftEdits = async ({ showFeedback = true } = {}) => {
+        if (activeAOperation || pendingAConfirmation || agentBusy || interrupted) return { changed: false };
+        resolveAcceptedASnapshot();
+        const operation = captureAOperation();
+        setAOperation(operation);
+        try {
+          await serverSyncQueue;
+          if (!isAOperationCurrent(operation) || !await saveAgentDraftOperation(operation)) return { changed: false };
+          if (!await strictAProjectSave(operation, serializeProject())) return { changed: false };
+          if (showFeedback) showToast(operation.collected.changed ? '简报草稿已保存，请确认 A 版后继续' : '简报没有新的修改');
+          return { changed: operation.collected.changed, run: operation.collected.run };
+        } catch (error) {
+          if (!isAOperationCurrent(operation)) return { changed: false };
+          throw error;
+        } finally {
+          if (activeAOperation === operation) setAOperation(null);
+        }
       };
       const validateDescriptionAConfirmation = (nextDescription) => {
         const currentRun = agentRunHistory.find((item) => item.runId === currentAgentRunId);
@@ -2431,53 +2587,65 @@
         if (!fieldValue('mustKeep').split(/\r?\n/).map((item) => item.trim()).filter(Boolean).length) errors.push('请至少填写一条必须保留项');
         return errors;
       };
+      const confirmDescriptionOperation = async (operation) => {
+        if (activeAOperation) return;
+        setAOperation(operation);
+        try {
+          await serverSyncQueue;
+          if (!isAOperationCurrent(operation) || !await saveAgentDraftOperation(operation)) return;
+          if (!await strictAProjectSave(operation, serializeProject())) return;
+          if (operation.runId) {
+            const response = await fetch(`${operation.routeUrl}/agent-runs/${encodeURIComponent(operation.runId)}/accept`, { method: 'POST' });
+            const payload = await response.json().catch(() => ({}));
+            if (!isAOperationCurrent(operation)) return;
+            if (!response.ok || !payload.run) throw new Error(payload.error || 'A 版确认失败，请重试');
+            agentRunHistory = [payload.run, ...agentRunHistory.filter((run) => run.runId !== payload.run.runId)].slice(0, 50);
+          }
+          operation.committing = true;
+          refreshAConfirmationState();
+          if (!await strictAProjectSave(operation, confirmedAProject(operation.content, operation.clearDownstream))) return;
+          if (operation.clearDownstream) {
+            resetDownstream(2);
+            generationResendSourceJobId = '';
+          }
+          acceptedASnapshot = operation.content;
+          descriptionA = operation.content.rawText;
+          progress = Math.max(progress, 3);
+          markStepComplete(2);
+          setCurrentStep(3, '等待确认');
+          unlockCard('b');
+          setStatus('提示词 B 待确认', 'is-ready');
+          persistState();
+          openDetail('b');
+          showToast('描述词 A 已确认，提示词 B 已解锁');
+        } catch (error) {
+          if (isAOperationCurrent(operation)) showToast(error.message || 'A 版确认失败，已有内容已保留，请重试');
+        } finally {
+          if (activeAOperation === operation) setAOperation(null);
+        }
+      };
+      const confirmPendingDescription = async () => {
+        const pending = pendingAConfirmation;
+        if (!pending || pending.modal !== modalSession || pending.operation.projectId !== projectId
+          || pending.operation.routeUrl !== projectApiUrl || pending.operation.session !== projectSession
+          || pending.operation.runId !== currentAgentRunId || JSON.stringify(pending.operation.content) !== JSON.stringify(editorAContent())) return;
+        closeModal();
+        await confirmDescriptionOperation(pending.operation);
+      };
       const confirmDescription = async () => {
-        const { nextDescription, changed } = collectAgentDraftPatch();
-        const semanticErrors = validateDescriptionAConfirmation(nextDescription);
+        if (activeAOperation || pendingAConfirmation || agentBusy || interrupted) return;
+        resolveAcceptedASnapshot();
+        const operation = captureAOperation();
+        const semanticErrors = validateDescriptionAConfirmation(operation.content.rawText);
         if (semanticErrors.length) { showToast(semanticErrors[0]); return; }
-        if (changed && progress > 3) {
-          const accepted = window.confirm('A 版简报已修改。提示词 B 和已生成结果需要重做。是否清除这些下游内容并继续？');
-          if (!accepted) return;
-          resetDownstream(2);
+        operation.clearDownstream = hasADownstream() && isAConfirmationPending();
+        if (operation.clearDownstream) {
+          openModal('确认 A 版修改', '<p class="modal-note">确认新的 A 版后，当前提示词 B 和生成结果需要重做。取消或保存失败会保留原内容，历史版本、任务记录和归档资产保留。</p><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="confirm-description-change">确认 A 版并继续</button></div>');
+          pendingAConfirmation = { operation, modal: modalSession };
+          refreshAConfirmationState();
+          return;
         }
-        const confirmButton = detailContents.a.querySelector('[data-detail-action="confirm-a"]');
-        if (!currentAgentRunId) {
-          try {
-            await saveAgentDraftEdits({ showFeedback: false });
-          } catch (error) {
-            showToast(error.message || '简报修改保存失败');
-            return;
-          }
-        }
-        if (currentAgentRunId) {
-          if (confirmButton) confirmButton.disabled = true;
-          try {
-            await saveAgentDraftEdits({ showFeedback: false });
-            const acceptResponse = await fetch(`${projectApiUrl}/agent-runs/${encodeURIComponent(currentAgentRunId)}/accept`, { method: 'POST' });
-            const acceptPayload = await acceptResponse.json().catch(() => ({}));
-            if (!acceptResponse.ok || !acceptPayload.run) throw new Error(acceptPayload.error || 'A 版确认失败');
-            agentRunHistory = [acceptPayload.run, ...agentRunHistory.filter((item) => item.runId !== acceptPayload.run.runId)].slice(0, 50);
-            currentAgentRunVersion = Number(acceptPayload.run.version) || currentAgentRunVersion;
-            descriptionAStructured = acceptPayload.run.output?.descriptionAStructured || descriptionAStructured;
-            agentWarnings = Array.isArray(acceptPayload.run.output?.warnings) ? acceptPayload.run.output.warnings : agentWarnings;
-            refreshAgentWarningPanel();
-            descriptionADraft = acceptPayload.run.output?.draft || descriptionADraft;
-          } catch (error) {
-            showToast(error.message || 'A 版确认失败，请重试');
-            if (confirmButton) confirmButton.disabled = false;
-            return;
-          }
-        }
-        descriptionA = nextDescription;
-        progress = Math.max(progress, 3);
-        markStepComplete(2);
-        setCurrentStep(3, '等待确认');
-        unlockCard('b');
-        setStatus('提示词 B 待确认', 'is-ready');
-        persistState();
-        syncProject();
-        openDetail('b');
-        showToast('描述词 A 已确认，提示词 B 已解锁');
+        await confirmDescriptionOperation(operation);
       };
       const readBExecutionFields = () => {
         const positivePrompt = document.querySelector('#prompt-editor')?.value.trim() || '';
@@ -2491,6 +2659,7 @@
       };
       const bPlatformOverridesBaseline = () => platformOverridesDirty && platformOverridesBeforeEdit ? platformOverridesBeforeEdit : platformOverrides;
       const confirmPrompt = () => {
+        if (!guardAConfirmation()) return;
         const bFields = readBExecutionFields();
         const nextPrompt = bFields.positivePrompt;
         if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
@@ -2524,6 +2693,7 @@
         nextButton.click();
       };
       const resendPromptB = () => {
+        if (!guardAConfirmation()) return;
         const bFields = readBExecutionFields();
         const nextPrompt = bFields.positivePrompt;
         if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
@@ -2551,6 +2721,7 @@
         window.setTimeout(() => generateResults(), 0);
       };
       const resendGeneration = () => {
+        if (!guardAConfirmation()) return;
         if (!selectedGenerationPlatforms.size) { showToast('请先选择至少一个生图平台'); return; }
         const executionValidation = validateBExecution({ positivePrompt: promptB, aspectRatio, platformParams });
         if (executionValidation.errors.length) { showToast(executionValidation.errors[0]); return; }
@@ -2568,6 +2739,7 @@
         generateResults();
       };
       const generateResults = async () => {
+        if (!guardAConfirmation()) return;
         if (agentBusy || interrupted) return;
         const executionValidation = validateBExecution({ positivePrompt: promptB, aspectRatio, platformParams });
         if (executionValidation.errors.length) { showToast(executionValidation.errors[0]); return; }
@@ -2584,6 +2756,8 @@
         if (overridesChanged) clearPromptBTemplateProvenance();
         commitPlatformOverrides();
         const attemptId = ++doubaoAttemptId;
+        const sending = captureASendingContext();
+        const isCurrentSending = () => attemptId === doubaoAttemptId && isASendingContextCurrent(sending);
         if (!generationRequestKey) generationRequestKey = window.crypto?.randomUUID?.() || `generation-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
         const platforms = [...selectedGenerationPlatforms];
         if (!platforms.length) { showToast('请至少选择一个生图平台'); return; }
@@ -2602,13 +2776,31 @@
         renderPlatformStatuses();
         if (bridgeStatus) bridgeStatus.textContent = '正在分别连接所选平台…';
         if (action) { action.disabled = true; action.textContent = '正在发送到所选平台'; action.insertAdjacentHTML('beforeend', '<span class="button-spinner" aria-hidden="true"></span>'); }
+        const releaseStaleSending = () => {
+          if (attemptId !== doubaoAttemptId || sending.projectId !== projectId || sending.routeUrl !== projectApiUrl || sending.session !== projectSession) return;
+          doubaoBridgeState = 'idle';
+          platforms.forEach((platform) => {
+            generationPlatforms[platform].state = 'idle';
+            generationPlatforms[platform].message = 'A 版内容已变化，请确认后重新发送';
+          });
+          if (bridgeStatus) bridgeStatus.textContent = 'A 版内容已变化，本次未发送到平台';
+          if (action) {
+            action.disabled = false;
+            action.textContent = '向所选平台发送';
+            if (action.dataset && Object.prototype.hasOwnProperty.call(action.dataset, 'aConfirmationDisabled')) action.dataset.aConfirmationDisabled = 'false';
+          }
+          refreshAConfirmationState();
+          renderPlatformStatuses();
+        };
         try {
-          const response = await fetch(`${projectApiUrl}/generation-jobs`, {
+          const response = await fetch(`${sending.routeUrl}/generation-jobs`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Idempotency-Key': generationRequestKey },
             body: JSON.stringify({ idempotencyKey: generationRequestKey, platforms, prompt: promptB, positivePrompt: promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, bSnapshot: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion }, ...(imageUrlAbsolute ? { referenceImageUrl: imageUrlAbsolute, productImageUrl: imageUrlAbsolute } : {}), ...(generationResendSourceJobId ? { sourceJobId: generationResendSourceJobId, resendType: 'results' } : {}) })
           });
+          if (!isCurrentSending()) { releaseStaleSending(); return; }
           const payload = await response.json().catch(() => ({}));
+          if (!isCurrentSending()) { releaseStaleSending(); return; }
           if (!response.ok || !payload.job?.jobId) throw new Error(payload.error || '无法在服务端创建生图任务。');
           generationJobId = payload.job.jobId;
           generationRequestKey = '';
@@ -2621,6 +2813,7 @@
             window.postMessage({ source: 'zaotu-workbench', type: 'PLATFORM_PREPARE', platform, payload: { ...payload.job, ...payload.job.platforms?.[platform], platform, jobId: payload.job.jobId, projectId, prompt: promptB, negativePrompt, aspectRatio, platformParams: payload.job.platforms?.[platform]?.platformParams || {}, platformOverrides, referenceImageUrl: imageUrlAbsolute, ...(imageUrlAbsolute ? { imageUrl: sourceImageUrl, imageUrlAbsolute } : {}), workbenchOrigin: window.location.origin } }, '*');
           });
         } catch (error) {
+          if (!isCurrentSending()) { releaseStaleSending(); return; }
           doubaoBridgeState = 'error';
           if (bridgeStatus) bridgeStatus.textContent = error.message || '无法创建生图任务。';
           if (action) { action.disabled = false; action.textContent = '重试生成'; }
@@ -2628,7 +2821,7 @@
           return;
         }
         window.setTimeout(() => {
-          if (attemptId !== doubaoAttemptId) return;
+          if (!isCurrentSending()) return;
           if (!platforms.some((platform) => ['queued', 'preparing', 'checking_login', 'filling'].includes(generationPlatforms[platform].state))) return;
           if (!doubaoExtensionReady) {
             doubaoBridgeState = 'missing';
@@ -3020,15 +3213,18 @@
         }
       });
       workflowCanvas.addEventListener('input', (event) => {
+        if (event.target.id === 'description-editor') { refreshAConfirmationState(); return; }
         const input = event.target.closest('[data-agent-field]');
         if (!input) return;
         const key = input.dataset.agentField;
         descriptionAFieldEdits[key] = input.value;
         refreshDraftFieldSource(key);
+        refreshAConfirmationState();
         persistState();
       });
       modal.addEventListener('click', (event) => {
         const modalAction = event.target.closest('[data-modal-action]')?.dataset.modalAction;
+        if (modalAction === 'confirm-description-change') confirmPendingDescription();
         if (modalAction === 'copy-prompt') copyText(promptB, '提示词 B 已复制');
       });
 
@@ -3173,6 +3369,8 @@
         if (saved) {
           progress = saved.progress || (saved.generated ? 2 : 1);
           descriptionA = saved.descriptionA || '';
+          acceptedASnapshot = Object.prototype.hasOwnProperty.call(saved, 'acceptedASnapshot')
+            ? (saved.acceptedASnapshot ? normalizeAContent(saved.acceptedASnapshot) : null) : undefined;
           descriptionAStructured = saved.descriptionAStructured && typeof saved.descriptionAStructured === 'object' ? saved.descriptionAStructured : {};
           agentWarnings = Array.isArray(saved.agentWarnings) ? saved.agentWarnings : [];
           descriptionADraft = saved.descriptionADraft && typeof saved.descriptionADraft === 'object' ? saved.descriptionADraft : null;
@@ -3244,9 +3442,11 @@
       } catch (error) {
         // A malformed local draft should not prevent the page from opening.
       }
+      resolveAcceptedASnapshot();
       renderProduct();
       renderProjectName();
       restoreWorkflow();
+      refreshAConfirmationState();
       restoreProjectFromServer();
       restoreAgentRunsFromServer();
       restoreGenerationJobFromServer();

@@ -33,17 +33,22 @@ const makeAContext = () => {
   const calls = [];
   const context = {
     detailContents: { a: aHost, c: cHost }, detailContent: cHost,
-    document: { querySelector: (selector) => selector === '#description-editor' ? raw : null },
+    document: { querySelector: (selector) => selector === '#description-editor' ? raw : null, querySelectorAll: () => [] },
+    acceptedASnapshot: undefined, activeAOperation: null, pendingAConfirmation: null, agentBusy: false, interrupted: false, pendingSceneChange: null,
+    projectId: 'test', projectSession: 0, modalSession: 0, serverSyncQueue: null, pendingProjectSync: null, invalidatedGenerationJobs: new Set(),
+    promptB: '', generationJobId: '', generatedResults: [], resultGenerated: false,
     descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: {}, descriptionAFieldEdits: {},
     agentRunHistory: [{ runId: 'run-1', output: { draft }, accepted: false }], currentAgentRunId: 'run-1', currentAgentRunVersion: 1,
     getDraftField: (key) => context.descriptionADraft.fields[key], agentWarnings: [], projectApiUrl: '/api/projects/test',
     progress: 2, window: { confirm: () => true },
+    serializeProject: () => ({}), agentInputSignature: () => '', setAgentBusy: (busy) => { context.agentBusy = busy; },
+    fetch: async () => ({ ok: true, json: async () => ({ project: {} }) }),
     persistState() {}, syncProject: async () => {}, showToast: (message) => calls.push(['toast', message]),
     refreshAgentWarningPanel() {}, resetDownstream: (step) => calls.push(['reset', step]),
     markStepComplete() {}, setCurrentStep() {}, unlockCard: (name) => calls.push(['unlock', name]), setStatus() {}, openDetail() {}
   };
   vm.createContext(context);
-  vm.runInContext([definitions, ...['parseDraftFieldInput', 'refreshDraftFieldSource', 'refreshSavedDraftFieldSources', 'collectAgentDraftPatch', 'validateDescriptionAConfirmation', 'saveAgentDraftEdits', 'confirmDescription'].map(declaration), 'globalThis.ui = { collectAgentDraftPatch, validateDescriptionAConfirmation, refreshDraftFieldSource, refreshSavedDraftFieldSources, saveAgentDraftEdits, confirmDescription };'].join('\n'), context);
+  vm.runInContext([definitions, ...['parseDraftFieldInput', 'refreshDraftFieldSource', 'refreshSavedDraftFieldSources', 'collectAgentDraftPatch', 'normalizeAContent', 'storedAContent', 'editorAContent', 'resolveAcceptedASnapshot', 'hasADownstream', 'isAConfirmationPending', 'refreshAConfirmationState', 'captureAOperation', 'isAOperationCurrent', 'setAOperation', 'strictAProjectSave', 'confirmedAProject', 'saveAgentDraftOperation', 'confirmDescriptionOperation', 'validateDescriptionAConfirmation', 'saveAgentDraftEdits', 'confirmDescription'].map(declaration), 'globalThis.ui = { collectAgentDraftPatch, validateDescriptionAConfirmation, refreshDraftFieldSource, refreshSavedDraftFieldSources, saveAgentDraftEdits, confirmDescription };'].join('\n'), context);
   return { context, inputs, badges, confirmButton, calls, raw };
 };
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -63,7 +68,7 @@ const makeProductContext = () => {
   }]));
   const errors = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}-error`, { textContent: '', hidden: true }]));
   const context = {
-    productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
+    acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
     descriptionA: '已有 A', promptB: '已有 B', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
     promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
     agentTemplateId: '', agentTemplateVersion: 0, descriptionAStructured: {}, agentWarnings: [], descriptionADraft: null,
@@ -444,7 +449,7 @@ test('generation picker renders explicit unverified platform status and keeps ma
     stepNodes: { c: { classList: { contains: () => false, add() {} }, querySelector: () => ({}) } }, detailContents: { c: host }, revealDetail() {},
     generationPlatforms: { doubao: { label: '豆包' }, chatgpt: { label: 'ChatGPT' }, gemini: { label: 'Gemini' }, lovart: { label: 'Lovart' } },
     selectedGenerationPlatforms: new Set(['doubao']), escapeHtml, doubaoExtensionReady: false,
-    syncPlatformPicker() {}, renderPlatformOverridesEditor() {}, renderPlatformStatuses() {}, resultGenerated: false
+    refreshAConfirmationState() {}, syncPlatformPicker() {}, renderPlatformOverridesEditor() {}, renderPlatformStatuses() {}, resultGenerated: false
   };
   vm.createContext(context);
   vm.runInContext(declaration('openDetail') + '\nopenDetail("c", false);', context);

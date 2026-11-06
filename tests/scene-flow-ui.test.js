@@ -44,6 +44,9 @@ const makeContext = ({ downstream = false } = {}) => {
   const storage = new Map(), requests = [], calls = [];
   const nodes = { '.reply-box button': replyButton, '.reply-box textarea': replyInput, '.agent-greeting strong': greeting, '.agent-greeting p': question, '.modal-close': closeButton, '.step-track': stepTrack, '[data-agent-failure]': failure, '[data-agent-failure-title]': failureTitle, '[data-agent-failure-message]': failureMessage, '[data-agent-retry]': retryButton };
   const context = {
+    acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null,
+    detailContents: { a: { querySelector: () => null } },
+    resolveAcceptedASnapshot() {}, refreshAConfirmationState() {},
     projectId: 'demo', projectApiUrl: '/api/projects/demo', projectSession: 0,
     pendingImportedProjectReload: false, pendingSceneChange: null, modalSession: 0,
     agentRequestSequence: 0, activeAgentRequest: null, agentBusy: false, agentFailure: null,
