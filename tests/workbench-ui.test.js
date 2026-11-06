@@ -63,7 +63,7 @@ const makeProductContext = () => {
   }]));
   const errors = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}-error`, { textContent: '', hidden: true }]));
   const context = {
-    productState: plain(product), progress: 4, generated: true, interrupted: false,
+    productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
     descriptionA: '已有 A', promptB: '已有 B', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
     promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
     agentTemplateId: '', agentTemplateVersion: 0, descriptionAStructured: {}, agentWarnings: [], descriptionADraft: null,
@@ -93,7 +93,7 @@ const makeProductContext = () => {
   };
   vm.createContext(context);
   const productHelpers = ['productFieldDefinitions', 'productFieldError', 'showProductFieldError', 'readProductEditor', 'refreshProductFieldValidation'].filter((name) => source.includes(`      const ${name} =`));
-  const agentHelpers = ['selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent'];
+  const agentHelpers = ['selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent', 'agentRequestError', 'clearAgentFailure'];
   vm.runInContext([...productHelpers.map(declaration), ...agentHelpers.map(declaration), ...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'requestAgent', 'openProductEditor', 'saveProduct'].map(declaration), 'globalThis.ui = { saveProduct, requestAgent, serializeProject, openProductEditor };'].join('\n'), context);
   return { context, product, inputs, errors, calls, requests, storage };
 };

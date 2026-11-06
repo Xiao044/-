@@ -111,6 +111,7 @@
               <div class="agent-greeting"><span class="agent-face" aria-hidden="true"><i></i><i></i><b></b></span><div><strong>商品资料已就绪</strong><p>补充场景后生成描述词。</p></div></div>
               <div class="question-box"><div class="question-meta"><span>补充创作方向</span><span>01 / 01</span></div><h3>你希望商品出现在什么场景里？</h3><p>选一个接近的方向，也可以写下自己的想法。</p><div class="scene-options"><button class="scene-option selected" type="button">自然窗边<svg class="ui-icon"><use href="#i-check"/></svg></button><button class="scene-option" type="button">纯色静物台</button><button class="scene-option" type="button">春日户外</button></div></div>
               <div class="reply-box"><textarea aria-label="补充场景描述" placeholder="例如：午后窗边，浅色亚麻布，柔和的自然光…"></textarea><button type="button" aria-label="提交场景描述"><svg class="ui-icon"><use href="#i-send"/></svg></button></div>
+              <section class="agent-failure" data-agent-failure role="alert" aria-atomic="true" hidden><strong data-agent-failure-title></strong><p data-agent-failure-message></p><button class="button button-secondary" type="button" data-agent-retry>重试</button></section>
               <div class="agent-privacy"><svg class="ui-icon"><use href="#i-shield"/></svg>仅处理文字资料，不进行图片识别</div>
             </div>
             <footer class="agent-actions"><button class="interrupt-button" type="button"><span aria-hidden="true"></span>中断节点</button><button class="button button-primary next-button" type="button">生成描述词 A<svg class="ui-icon"><use href="#i-arrow"/></svg></button></footer>
@@ -193,6 +194,7 @@
       let pendingImportedProjectReload = false;
       let pendingSceneChange = null;
       let activeAgentRequest = null;
+      let agentFailure = null;
       let agentRequestSequence = 0;
       let toastTimer;
       let editingAgent = false;
@@ -422,16 +424,16 @@
         return serverSyncQueue;
       };
       const ensureProjectOnServer = async (routeUrl = projectApiUrl, snapshot = serializeProject(), isCurrent = () => true) => {
-        const current = await fetch(routeUrl, { cache: 'no-store' });
+        const current = await fetch(routeUrl, { cache: 'no-store' }).catch(() => { throw agentRequestError('NETWORK_ERROR'); });
         if (!isCurrent()) return;
         if (current.ok) return;
-        if (current.status !== 404) throw new Error('项目暂时无法读取，请稍后重试');
+        if (current.status !== 404) throw agentRequestError('PROJECT_NOT_FOUND', current.status);
         const created = await fetch(routeUrl, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(snapshot)
-        });
-        if (isCurrent() && !created.ok) throw new Error('项目未能保存到服务端，请稍后重试');
+        }).catch(() => { throw agentRequestError('NETWORK_ERROR'); });
+        if (isCurrent() && !created.ok) throw agentRequestError('PERSIST_FAILED', created.status);
       };
       const restoreAgentRunsFromServer = async () => {
         const routeUrl = projectApiUrl, session = projectSession, restoringProjectId = projectId;
@@ -794,13 +796,64 @@
       const agentInputSignature = () => JSON.stringify({ scene: selectedSceneName(), note: agentNote, product: productState });
       const captureAgentRequest = (task) => ({
         id: ++agentRequestSequence, task, projectId, routeUrl: projectApiUrl, session: projectSession,
-        inputSignature: agentInputSignature(),
+        inputSignature: agentInputSignature(), noteInput: document.querySelector('.reply-box textarea')?.value || '',
         body: JSON.stringify({ task, scene: selectedSceneName(), note: agentNote, product: productState }),
         projectSnapshot: JSON.parse(JSON.stringify(serializeProject()))
       });
       const isAgentRequestCurrent = (request) => !request.cancelled && request.projectId === projectId && request.routeUrl === projectApiUrl
         && request.session === projectSession && request.inputSignature === agentInputSignature();
+      const agentRequestError = (code, status = 0) => Object.assign(new Error('Agent 请求未完成'), { code: String(code || 'MODEL_REQUEST_FAILED'), status: Number(status) || 0 });
+      const agentFailureMessage = (error) => {
+        const reasons = {
+          AGENT_NOT_CONFIGURED: '文字服务尚未配置，请检查服务端配置后手动重试。',
+          MODEL_TIMEOUT: '文字服务响应超时，请稍后手动重试。',
+          MODEL_EMPTY_RESPONSE: '文字服务返回了空内容，请手动重试。',
+          MODEL_INVALID_JSON: '文字服务返回的内容格式无效，请手动重试。',
+          MODEL_SCHEMA_INVALID: '文字服务未返回有效的 A 版格式，请手动重试。',
+          INVALID_REQUEST: '提交的资料不符合要求，请检查商品资料和补充输入后再提交。',
+          UNSUPPORTED_TASK: '当前文字操作不受支持，请刷新页面后重试。',
+          PROJECT_NOT_FOUND: '当前项目暂时无法读取，请检查服务并重新保存项目后重试。',
+          PERSIST_FAILED: '运行记录未能保存，请检查服务和项目保存状态后重试。',
+          AGENT_CANCELLED: '这次请求已取消，已有内容保留，可以手动重试。',
+          NETWORK_ERROR: '无法连接文字服务，请检查网络和本地服务后手动重试。'
+        };
+        return Object.hasOwn(reasons, error?.code) ? reasons[error.code] : (error?.status === 429 ? '文字服务请求较多，请稍后手动重试。' : '文字服务暂时不可用，请稍后手动重试。');
+      };
+      const isAgentFailureCurrent = () => agentFailure && isAgentRequestCurrent(agentFailure.request)
+        && agentFailure.noteInput === (document.querySelector('.reply-box textarea')?.value || '');
+      const clearAgentFailure = () => {
+        const hadFailure = Boolean(agentFailure);
+        agentFailure = null;
+        const panel = document.querySelector('[data-agent-failure]');
+        if (panel) panel.hidden = true;
+        if (hadFailure && !agentBusy && !interrupted) setStatus(generated ? '描述词 A 已生成' : '等待回答', generated ? 'is-ready' : '');
+      };
+      const renderAgentFailure = () => {
+        if (agentFailure && !isAgentFailureCurrent()) clearAgentFailure();
+        const panel = document.querySelector('[data-agent-failure]');
+        if (!panel) return;
+        panel.hidden = !agentFailure;
+        if (!agentFailure) return;
+        document.querySelector('[data-agent-failure-title]').textContent = agentFailure.request.task === 'description_a' ? '生成描述词 A 失败' : '提交补充失败';
+        document.querySelector('[data-agent-failure-message]').textContent = agentFailure.message;
+        const retry = document.querySelector('[data-agent-retry]');
+        retry.textContent = agentFailure.request.task === 'description_a' ? '重试生成描述词 A' : '重新提交补充';
+        retry.disabled = agentBusy || interrupted || Boolean(pendingSceneChange);
+      };
+      const showAgentFailure = (request, error) => {
+        if (request.noteInput !== (document.querySelector('.reply-box textarea')?.value || '')) {
+          setStatus('补充输入已修改，请重新提交');
+          return;
+        }
+        agentFailure = { request, noteInput: request.noteInput, message: agentFailureMessage(error) };
+        renderAgentFailure();
+        if (agentFailure) {
+          setStatus(request.task === 'description_a' ? 'A 版生成失败' : '补充提交失败', 'is-interrupted');
+          showToast(agentFailure.message);
+        }
+      };
       const beginAgentRequest = (task) => {
+        clearAgentFailure();
         if (activeAgentRequest) activeAgentRequest.cancelled = true;
         const request = captureAgentRequest(task);
         activeAgentRequest = request;
@@ -813,6 +866,7 @@
         setAgentBusy(false);
       };
       const invalidateAgentRequest = () => {
+        clearAgentFailure();
         if (activeAgentRequest) activeAgentRequest.cancelled = true;
         activeAgentRequest = null;
         setAgentBusy(false);
@@ -824,15 +878,15 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: request.body
-        });
-        const payload = await response.json().catch(() => ({}));
+        }).catch(() => { throw agentRequestError('NETWORK_ERROR'); });
+        const payload = await response.json().catch(() => null);
         if (!isAgentRequestCurrent(request)) return null;
-        if (payload.run) {
+        if (payload?.run) {
           agentRunHistory = [payload.run, ...agentRunHistory.filter((run) => run.runId !== payload.run.runId)].slice(0, 50);
           latestAgentDraftVersion = Math.max(latestAgentDraftVersion, Number(payload.run.output?.version) || 0);
         }
-        if (!response.ok) throw new Error(payload.error || 'AI 服务暂时不可用');
-        if (!payload.run?.output) throw new Error('Agent 没有返回有效运行记录');
+        if (!response.ok) throw agentRequestError(payload?.errorCode, response.status);
+        if (!payload?.run?.output) throw agentRequestError('MODEL_SCHEMA_INVALID', response.status);
         return { ...payload.run.output, run: payload.run };
       };
 
@@ -850,6 +904,7 @@
         nextButton.innerHTML = busy
           ? `${activeAgentRequest?.task === 'restore_a' ? '正在恢复 A 版' : 'DeepSeek 整理中'}<span class="button-spinner" aria-hidden="true"></span>`
           : (generated && !editingAgent ? '描述词 A 已生成<svg class="ui-icon"><use href="#i-check"></use></svg>' : `${generated ? '重新生成' : '生成'}描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg>`);
+        renderAgentFailure();
       };
 
       const hasSceneDownstream = () => progress > 1 || generated || Boolean(descriptionA || promptB || negativePrompt
@@ -857,6 +912,7 @@
         || generationJobId || generationResendSourceJobId || resultGenerated || resultSelected >= 0 || generatedResults.length);
       const applySceneSelection = (option) => {
         if (interrupted || agentBusy || !sceneOptions.includes(option) || option.classList.contains('selected')) return;
+        clearAgentFailure();
         const savedNote = agentNote;
         const noteInput = document.querySelector('.reply-box textarea');
         const editingNote = noteInput.value;
@@ -912,17 +968,18 @@
           showToast('节点已继续');
         }
         persistState();
+        renderAgentFailure();
       });
 
-      nextButton.addEventListener('click', () => {
-        if (interrupted || (generated && !editingAgent) || agentBusy || pendingSceneChange) return;
+      const generateDescriptionA = (retry = false) => {
+        if (interrupted || (generated && !editingAgent && !retry) || agentBusy || pendingSceneChange) return;
         const wasGenerated = generated;
         const request = beginAgentRequest('description_a');
         setStatus('正在请求 DeepSeek', 'is-ready');
         requestAgent('description_a', request).then((payload) => {
           if (activeAgentRequest !== request || !isAgentRequestCurrent(request) || !payload) return;
           const nextDescription = String(payload.descriptionA || '').trim();
-          if (!nextDescription) throw new Error('DeepSeek 没有返回描述词 A');
+          if (!nextDescription) throw agentRequestError('MODEL_EMPTY_RESPONSE');
           const descriptionChanged = wasGenerated && nextDescription !== descriptionA;
           if (descriptionChanged && progress > 2) {
             const accepted = window.confirm('新的描述词 A 与已确认版本不同。提示词 B 和已生成结果需要重做。是否清除下游内容并继续？');
@@ -962,12 +1019,12 @@
             : (descriptionChanged ? '描述词 A 已更新，下游内容需要重新确认' : 'DeepSeek 已生成描述词 A'));
         }).catch((error) => {
           if (activeAgentRequest !== request || !isAgentRequestCurrent(request)) return;
-          setStatus('AI 请求失败', 'is-interrupted');
-          showToast(error.message || 'DeepSeek 暂时不可用');
+          showAgentFailure(request, error);
         }).finally(() => {
           finishAgentRequest(request);
         });
-      });
+      };
+      nextButton.addEventListener('click', () => generateDescriptionA());
 
       saveButton.addEventListener('click', () => {
         saveState.innerHTML = '<svg class="ui-icon"><use href="#i-check"></use></svg>刚刚保存';
@@ -982,7 +1039,7 @@
         }, 3000);
       });
 
-      document.querySelector('.reply-box button').addEventListener('click', () => {
+      const submitAgentNote = () => {
         if (interrupted || agentBusy || pendingSceneChange) return;
         const input = document.querySelector('.reply-box textarea');
         agentNote = input.value.trim();
@@ -1005,12 +1062,20 @@
           showToast(question || 'DeepSeek 已收到补充');
         }).catch((error) => {
           if (activeAgentRequest !== request || !isAgentRequestCurrent(request)) return;
-          setStatus('AI 请求失败', 'is-interrupted');
-          showToast(error.message || 'DeepSeek 暂时不可用');
+          showAgentFailure(request, error);
         }).finally(() => {
           finishAgentRequest(request);
         });
-      });
+      };
+      const retryAgentRequest = () => {
+        if (!isAgentFailureCurrent()) { clearAgentFailure(); return; }
+        if (interrupted || agentBusy || pendingSceneChange) return;
+        if (agentFailure.request.task === 'description_a') generateDescriptionA(true);
+        else submitAgentNote();
+      };
+      document.querySelector('.reply-box button').addEventListener('click', submitAgentNote);
+      document.querySelector('.reply-box textarea').addEventListener('input', clearAgentFailure);
+      document.querySelector('[data-agent-retry]').addEventListener('click', retryAgentRequest);
 
       const flowSteps = [...document.querySelectorAll('.flow-step')];
       const workflowCanvas = document.querySelector('#workflow-canvas');
@@ -1111,6 +1176,7 @@
           if (!accepted) return;
           resetDownstream(0);
         }
+        clearAgentFailure();
         productState = nextProduct;
         renderProduct();
         persistState();
@@ -1992,7 +2058,7 @@
         } catch (error) {
           if (!isRestoreContextCurrent()) return;
           if (restoreButton?.isConnected) { restoreButton.disabled = false; restoreButton.textContent = '恢复为新草稿'; }
-          showToast(error.message || '历史草稿恢复失败');
+          showToast(error?.code ? agentFailureMessage(error) : (error.message || '历史草稿恢复失败'));
         } finally {
           finishAgentRequest(request);
         }

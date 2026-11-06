@@ -190,6 +190,11 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
 .reply-box button.is-loading::after { content: ''; width: 12px; height: 12px; border: 1.5px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .75s linear infinite; }
 .agent-privacy { display: flex; align-items: center; gap: 4px; color: #81765f; font-size: 12px; margin-top: 10px; }
 .agent-privacy .ui-icon { width: 12px; height: 12px; }
+.agent-failure { margin-top: 12px; padding: 12px; border: 1px solid #e4bdab; border-radius: 9px; background: #fff8ef; color: #774833; }
+.agent-failure[hidden] { display: none; }
+.agent-failure strong { font-size: 13px; }
+.agent-failure p { margin: 7px 0 10px; font-size: 12px; line-height: 1.7; }
+.agent-failure .button { min-height: 32px; white-space: normal; text-align: left; }
 .agent-actions { margin-top: auto; border-top: 1px solid #eee8d6; display: flex; align-items: center; justify-content: space-between; padding: 12px 23px; background: #fffdf6; }
 .interrupt-button { background: transparent; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #81765f; padding: 8px 0; }
 .interrupt-button > span { width: 7px; height: 7px; border: 1px solid #ac9f83; border-radius: 1px; }

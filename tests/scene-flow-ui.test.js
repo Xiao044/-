@@ -25,7 +25,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const element = (textContent = '') => ({
-  textContent, innerHTML: '', value: '', disabled: false, open: false, dataset: {}, attributes: {}, handlers: {},
+  textContent, innerHTML: '', value: '', disabled: false, hidden: false, open: false, dataset: {}, attributes: {}, handlers: {},
   classList: { values: new Set(), contains(value) { return this.values.has(value); }, add(value) { this.values.add(value); }, remove(value) { this.values.delete(value); }, toggle(value, enabled) { const on = enabled ?? !this.values.has(value); on ? this.values.add(value) : this.values.delete(value); return on; } },
   setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; },
   addEventListener(type, listener) { (this.handlers[type] ||= []).push(listener); },
@@ -39,12 +39,14 @@ const makeContext = ({ downstream = false } = {}) => {
   const next = element(), replyButton = element(), replyInput = element(), modal = element(), modalTitle = element(), modalBody = element(), closeButton = element(), stepTrack = element();
   replyInput.value = ' 尚未提交的方向文字 ';
   const greeting = element('旧回复'), question = element('旧问题');
+  const failure = element(), failureTitle = element(), failureMessage = element(), retryButton = element();
+  failure.hidden = true;
   const storage = new Map(), requests = [], calls = [];
-  const nodes = { '.reply-box button': replyButton, '.reply-box textarea': replyInput, '.agent-greeting strong': greeting, '.agent-greeting p': question, '.modal-close': closeButton, '.step-track': stepTrack };
+  const nodes = { '.reply-box button': replyButton, '.reply-box textarea': replyInput, '.agent-greeting strong': greeting, '.agent-greeting p': question, '.modal-close': closeButton, '.step-track': stepTrack, '[data-agent-failure]': failure, '[data-agent-failure-title]': failureTitle, '[data-agent-failure-message]': failureMessage, '[data-agent-retry]': retryButton };
   const context = {
     projectId: 'demo', projectApiUrl: '/api/projects/demo', projectSession: 0,
     pendingImportedProjectReload: false, pendingSceneChange: null, modalSession: 0,
-    agentRequestSequence: 0, activeAgentRequest: null, agentBusy: false,
+    agentRequestSequence: 0, activeAgentRequest: null, agentBusy: false, agentFailure: null,
     sceneOptions: scenes, interrupted: false, generated: downstream, editingAgent: false, progress: downstream ? 4 : 1,
     productState: { name: '项链', subtitle: '', description: '', imageUrl: '/product.png', facts: { material: '黄铜' }, extension: { sku: 'sku-1' } },
     agentNote: '已提交方向文字', descriptionA: downstream ? '原 A' : '', descriptionAStructured: {}, agentWarnings: [], descriptionADraft: null, descriptionAFieldEdits: {},
@@ -56,7 +58,7 @@ const makeContext = ({ downstream = false } = {}) => {
     generationJobId: downstream ? 'job-old' : '', generationResendSourceJobId: downstream ? 'job-source' : '', invalidatedGenerationJobs: new Set(),
     doubaoBridgeState: downstream ? 'completed' : 'idle', doubaoAttemptId: 0, selectedGenerationPlatforms: new Set(['doubao']),
     generationPlatforms: { doubao: { state: downstream ? 'completed' : 'idle', message: '', attemptId: 'attempt-old' } },
-    nextButton: next, interruptButton: element(), modal, modalTitle, modalBody, closeButton,
+    nextButton: next, interruptButton: element(), currentStep: element(), currentStepLabel: element(), modal, modalTitle, modalBody, closeButton,
     flowSteps: [element(), element(), element(), element(), element()], workflowNodes: [], stepNodes: {},
     storageKey: 'scene-test', projectName: '测试项目', serverUpdatedAt: '', pendingProjectSync: null, serverSyncQueue: null,
     document: { querySelector: (selector) => nodes[selector] || null },
@@ -74,11 +76,12 @@ const makeContext = ({ downstream = false } = {}) => {
     }
   };
   vm.createContext(context);
-  const helpers = ['selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent', 'beginAgentRequest', 'finishAgentRequest', 'invalidateAgentRequest', 'hasSceneDownstream', 'applySceneSelection', 'selectScene', 'confirmSceneChange'];
+  const helpers = ['selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent', 'beginAgentRequest', 'finishAgentRequest', 'invalidateAgentRequest', 'hasSceneDownstream', 'applySceneSelection', 'selectScene', 'confirmSceneChange', 'agentRequestError', 'agentFailureMessage', 'clearAgentFailure', 'isAgentFailureCurrent', 'renderAgentFailure', 'showAgentFailure', 'retryAgentRequest', 'generateDescriptionA', 'submitAgentNote'];
   const presentHelpers = helpers.filter((name) => source.includes(`      const ${name} =`));
   vm.runInContext([
     ...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'ensureProjectOnServer', 'restoreAgentRunsFromServer', 'restoreAgentRun', 'requestAgent', 'setAgentBusy', 'openModal', 'closeModal', 'resetDownstream', ...presentHelpers].map(declaration),
     between('      sceneOptions.forEach((option) => {', "      interruptButton.addEventListener('click'"),
+    between("      interruptButton.addEventListener('click'", '      const generateDescriptionA ='),
     between("      nextButton.addEventListener('click'", "      saveButton.addEventListener('click'"),
     between("      document.querySelector('.reply-box button').addEventListener('click'", '      const flowSteps ='),
     between("      document.querySelector('.modal-close').addEventListener('click'", "      modal.addEventListener('click'"),
@@ -87,7 +90,7 @@ const makeContext = ({ downstream = false } = {}) => {
     `globalThis.modalAction = (action) => { ${between("        const action = event.target.closest('[data-modal-action]')?.dataset.modalAction;", '        const taskActionElement =').replace("        const action = event.target.closest('[data-modal-action]')?.dataset.modalAction;", '')} };`,
     `globalThis.ui = { requestAgent, restoreAgentRunsFromServer, restoreAgentRun, serializeProject, openModal, closeModal, ${presentHelpers.join(', ')} };`
   ].join('\n'), context);
-  return { context, scenes, next, replyButton, replyInput, modal, closeButton, stepTrack, greeting, question, storage, requests, calls };
+  return { context, scenes, next, replyButton, replyInput, modal, closeButton, stepTrack, greeting, question, storage, requests, calls, failure, failureTitle, failureMessage, retryButton };
 };
 const selected = ({ scenes }) => scenes.find((item) => item.classList.contains('selected')).textContent;
 
@@ -255,7 +258,7 @@ test('Agent failure unlocks scene changes and allows retry', async () => {
   setup.replyButton.emit('click'); await tick();
   assert.equal(setup.context.agentBusy, false);
   assert.equal(setup.scenes[1].disabled, false);
-  assert.ok(setup.calls.some(([kind, message]) => kind === 'toast' && message === '网络失败'));
+  assert.ok(setup.calls.some(([kind, message]) => kind === 'toast' && /网络|暂时不可用/.test(message)));
   setup.scenes[1].emit('click');
   assert.equal(selected(setup), '工作室');
 });
@@ -425,4 +428,150 @@ test('history restore sync completion cannot close a newer dialog, affect a new 
     assert.deepEqual(plain(setup.calls), before);
     if (changed === 'edited-a') assert.equal(setup.context.descriptionA, '稍后修改 A');
   }
+});
+
+const failedAgentResponse = (code = 'MODEL_TIMEOUT', status = 504, message = '服务失败') => ({ ok: false, status, json: async () => ({ error: message, errorCode: code }) });
+for (const downstream of [false, true]) {
+  test(`clearing a failed Agent request after the real pause action preserves the interrupted status (generated=${downstream})`, async () => {
+    const setup = makeContext({ downstream });
+    setup.context.editingAgent = true;
+    setup.context.fetch = async (_url, options = {}) => options.method === 'POST' ? failedAgentResponse() : { ok: true };
+    setup.next.emit('click'); await tick();
+    assert.equal(setup.failure.hidden, false);
+    setup.context.interruptButton.emit('click');
+    assert.deepEqual(setup.calls.filter(([kind]) => kind === 'status').at(-1), ['status', '已中断', 'is-interrupted']);
+    setup.replyInput.value = '中断后编辑的补充';
+    setup.replyInput.emit('input');
+    assert.equal(setup.failure.hidden, true);
+    assert.equal(setup.context.interrupted, true);
+    assert.equal(setup.next.disabled, true);
+    assert.equal(setup.context.currentStep.classList.contains('paused'), true);
+    assert.deepEqual(setup.calls.filter(([kind]) => kind === 'status').at(-1), ['status', '已中断', 'is-interrupted']);
+    assert.equal(setup.context.descriptionA, downstream ? '原 A' : '');
+  });
+}
+
+for (const [failureKind, expected] of [['network', /网络|连接/], ['read', /项目.*读取/], ['create-network', /网络|连接/], ['save', /保存/], ['restore-api', /既有恢复接口错误/]]) {
+  test(`history restore retains useful ${failureKind} failure feedback and the existing restore API message`, async () => {
+    const setup = makeContext({ downstream: true }), restoreButton = element('恢复为新草稿'), requested = [];
+    restoreButton.isConnected = true;
+    setup.context.modalBody.querySelector = () => restoreButton;
+    setup.context.agentRunHistory = [{ runId: 'old', task: 'description_a', status: 'completed', output: { draft: { rawText: '旧历史 A' } } }];
+    const history = plain(setup.context.agentRunHistory);
+    setup.context.fetch = async (url, options = {}) => {
+      const method = options.method || 'GET';
+      requested.push(method);
+      if (method === 'GET') {
+        if (failureKind === 'network') throw new TypeError('Failed to fetch');
+        return { ok: failureKind === 'restore-api', status: failureKind.startsWith('create-') || failureKind === 'save' ? 404 : 503 };
+      }
+      if (method === 'PUT' && failureKind === 'create-network') throw new TypeError('Failed to fetch');
+      return { ok: false, status: method === 'PUT' ? 500 : 409, json: async () => ({ error: '既有恢复接口错误' }) };
+    };
+    await setup.context.ui.restoreAgentRun('old');
+    assert.match(setup.calls.filter(([kind]) => kind === 'toast').at(-1)[1], expected);
+    assert.equal(setup.context.agentBusy, false);
+    assert.equal(setup.failure.hidden, true);
+    assert.equal(restoreButton.disabled, false);
+    assert.equal(restoreButton.textContent, '恢复为新草稿');
+    assert.equal(setup.context.descriptionA, '原 A'); assert.equal(setup.context.promptB, '原 B');
+    assert.deepEqual(plain(setup.context.agentRunHistory), history);
+    assert.deepEqual(requested, failureKind === 'restore-api' ? ['GET', 'POST'] : failureKind.startsWith('create-') || failureKind === 'save' ? ['GET', 'PUT'] : ['GET']);
+  });
+}
+
+for (const task of ['description_a', 'follow_up']) {
+  test(`${task} keeps a persistent task-specific failure and its manual retry preserves existing content`, async () => {
+    const setup = makeContext({ downstream: true });
+    setup.context.editingAgent = true;
+    const product = plain(setup.context.productState), oldA = setup.context.descriptionA, oldB = setup.context.promptB, oldResults = plain(setup.context.generatedResults);
+    let posts = 0; const pending = deferred();
+    setup.context.fetch = async (url, options = {}) => {
+      if (options.method === 'POST') { setup.requests.push({ url, body: JSON.parse(options.body) }); posts++; return posts === 1 ? failedAgentResponse() : pending.promise; }
+      return { ok: true, json: async () => ({}) };
+    };
+    (task === 'description_a' ? setup.next : setup.replyButton).emit('click'); await tick();
+    assert.equal(posts, 1);
+    assert.equal(setup.context.agentBusy, false);
+    assert.equal(setup.failure.hidden, false);
+    assert.match(setup.failureTitle.textContent, task === 'description_a' ? /生成描述词 A/ : /提交补充/);
+    assert.match(setup.failureMessage.textContent, /超时/);
+    assert.equal(setup.retryButton.textContent, task === 'description_a' ? '重试生成描述词 A' : '重新提交补充');
+    assert.equal(setup.context.descriptionA, oldA); assert.equal(setup.context.promptB, oldB);
+    assert.deepEqual(plain(setup.context.productState), product); assert.deepEqual(plain(setup.context.generatedResults), oldResults);
+    assert.equal(setup.replyInput.value, ' 尚未提交的方向文字 ');
+    assert.equal(setup.storage.size, 0);
+    setup.retryButton.emit('click'); setup.retryButton.emit('click'); await tick();
+    assert.equal(posts, 2); assert.equal(setup.requests[1].body.task, task);
+    assert.equal(setup.context.agentBusy, true); assert.equal(setup.scenes[1].disabled, true);
+    assert.equal(setup.failure.hidden, true);
+    pending.resolve({ ok: true, json: async () => ({ run: { runId: 'retry-ok', output: { descriptionA: oldA, reply: '重试回复' } } }) }); await tick();
+    assert.equal(setup.context.agentBusy, false); assert.equal(setup.failure.hidden, true);
+    assert.equal(setup.context.promptB, oldB);
+    assert.equal(task === 'follow_up' ? setup.greeting.textContent : setup.context.currentAgentRunId, task === 'follow_up' ? '重试回复' : 'retry-ok');
+  });
+}
+
+test('Agent errors preserve stable codes and HTTP status and show safe useful reasons without raw response text', async () => {
+  for (const [code, status, expected] of [['AGENT_NOT_CONFIGURED', 503, /配置/], ['MODEL_INVALID_JSON', 502, /格式/], ['MODEL_SCHEMA_INVALID', 502, /格式/], ['INVALID_REQUEST', 400, /资料|输入/], ['PERSIST_FAILED', 500, /保存/], ['UNKNOWN', 502, /暂时不可用/], ['toString', 502, /暂时不可用/], ['constructor', 429, /请求较多/]]) {
+    const setup = makeContext();
+    setup.context.fetch = async (_url, options = {}) => options.method === 'POST' ? failedAgentResponse(code, status, '<img src=x onerror=alert(1)> secret=sk-private') : { ok: true };
+    await assert.rejects(setup.context.ui.requestAgent('description_a'), (error) => error.code === code && error.status === status);
+    setup.next.emit('click'); await tick();
+    assert.equal(setup.failure.hidden, false); assert.match(setup.failureMessage.textContent, expected);
+    assert.doesNotMatch(setup.failureMessage.textContent, /<img|sk-private|secret=/);
+    assert.equal(setup.failureMessage.innerHTML, '');
+  }
+});
+
+test('network and malformed-success failures remain actionable without losing the previous A or generating B', async () => {
+  for (const failureKind of ['network', 'missing-output', 'invalid-json']) {
+    const setup = makeContext({ downstream: true }); setup.context.editingAgent = true;
+    setup.context.fetch = async (_url, options = {}) => {
+      if (options.method !== 'POST') return { ok: true };
+      if (failureKind === 'network') throw new TypeError('Failed to fetch');
+      return { ok: true, status: 200, json: async () => { if (failureKind === 'invalid-json') throw new SyntaxError('bad response'); return {}; } };
+    };
+    setup.next.emit('click'); await tick();
+    assert.equal(setup.failure.hidden, false); assert.equal(setup.retryButton.disabled, false);
+    assert.match(setup.failureMessage.textContent, failureKind === 'network' ? /网络|连接/ : /格式|有效/);
+    assert.equal(setup.context.descriptionA, '原 A'); assert.equal(setup.context.promptB, '原 B'); assert.equal(setup.context.progress, 4);
+  }
+});
+
+test('editing the supplemental input clears its old failure and normal resubmission uses the current text once', async () => {
+  const setup = makeContext(); let posts = 0;
+  setup.context.fetch = async (_url, options = {}) => {
+    if (options.method === 'POST') { posts++; setup.requests.push(JSON.parse(options.body)); return failedAgentResponse(); }
+    return { ok: true };
+  };
+  setup.replyButton.emit('click'); await tick();
+  assert.equal(setup.failure.hidden, false);
+  setup.replyInput.value = '新的补充'; setup.replyInput.emit('input');
+  assert.equal(setup.failure.hidden, true);
+  setup.retryButton.emit('click'); await tick(); assert.equal(posts, 1);
+  setup.replyButton.emit('click'); await tick(); assert.equal(posts, 2); assert.equal(setup.requests[1].note, '新的补充');
+});
+
+test('changing committed inputs or project invalidates an old failure without replaying its snapshot', async () => {
+  for (const change of ['product', 'scene', 'session']) {
+    const setup = makeContext(); let posts = 0;
+    setup.context.fetch = async (_url, options = {}) => { if (options.method === 'POST') { posts++; return failedAgentResponse(); } return { ok: true }; };
+    setup.next.emit('click'); await tick(); assert.equal(setup.failure.hidden, false);
+    if (change === 'product') setup.context.productState.name = '新商品';
+    if (change === 'scene') setup.scenes[1].emit('click');
+    if (change === 'session') setup.context.projectSession++;
+    setup.retryButton.emit('click'); await tick();
+    assert.equal(posts, 1); assert.equal(setup.failure.hidden, true);
+  }
+});
+
+test('stale failures cannot expose a retry in the new project or replace a newer failure', async () => {
+  const setup = makeContext(), old = deferred(); let posts = 0;
+  setup.context.fetch = async (_url, options = {}) => { if (options.method === 'POST') return ++posts === 1 ? old.promise : failedAgentResponse('AGENT_NOT_CONFIGURED', 503); return { ok: true }; };
+  setup.next.emit('click'); await tick();
+  setup.context.projectId = 'new'; setup.context.projectApiUrl = '/api/projects/new'; setup.context.projectSession++; setup.context.ui.invalidateAgentRequest();
+  setup.next.emit('click'); await tick(); assert.match(setup.failureMessage.textContent, /配置/);
+  old.resolve(failedAgentResponse('MODEL_TIMEOUT', 504)); await tick();
+  assert.match(setup.failureMessage.textContent, /配置/); assert.equal(setup.context.agentBusy, false);
 });
