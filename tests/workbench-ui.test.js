@@ -48,6 +48,110 @@ const makeAContext = () => {
 };
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+const makeProductContext = () => {
+  const product = {
+    name: '黄铜项链', subtitle: '金色细链', description: '保留商品原有结构', imageUrl: '/data/uploads/test/product.png',
+    facts: { material: '黄铜', color: '金色', size: '8mm', batch: 'B-01' },
+    material: '黄铜', color: '金色', size: '8mm', category: '首饰', brand: '自有品牌', extension: { sku: 'sku-01', tags: ['首发'] }
+  };
+  const inputs = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}`, { value: product[key] }]));
+  const calls = [], requests = [], storage = new Map();
+  const context = {
+    productState: plain(product), progress: 4, generated: true, interrupted: false,
+    descriptionA: '已有 A', promptB: '已有 B', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
+    promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
+    agentTemplateId: '', agentTemplateVersion: 0, descriptionAStructured: {}, agentWarnings: [], descriptionADraft: null,
+    descriptionAFieldEdits: {}, currentAgentRunId: '', currentAgentRunVersion: 0, aReferenceImageUrl: '',
+    resultGenerated: true, resultSelected: 0, generatedResults: [{ url: '/data/uploads/test/result.png' }],
+    invalidatedGenerationJobs: new Set(), doubaoBridgeState: 'completed', generationJobId: 'job-1', generationResendSourceJobId: '',
+    selectedGenerationPlatforms: new Set(['doubao']), versions: [], projectName: '测试项目', projectId: 'test', agentNote: '',
+    storageKey: 'product-save-test', projectApiUrl: '/api/projects/test', serverUpdatedAt: '', serverSyncQueue: null, pendingProjectSync: null,
+    agentRunHistory: [], latestAgentDraftVersion: 0,
+    sceneOptions: [{ textContent: '自然窗边', classList: { contains: () => true } }],
+    window: {
+      localStorage: { setItem: (key, value) => storage.set(key, value), getItem: (key) => storage.get(key) ?? null },
+      confirm: () => { calls.push(['confirm']); return true; }
+    },
+    document: { querySelector: (selector) => inputs[selector] || null },
+    renderProduct: () => calls.push(['render']), closeModal: () => calls.push(['close']), showToast: (message) => calls.push(['toast', message]),
+    resetDownstream: (step) => { calls.push(['reset', step]); context.progress = 1; context.descriptionA = ''; context.promptB = ''; context.generatedResults = []; },
+    ensureProjectOnServer: async () => {},
+    fetch: async (url, options) => {
+      requests.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => options.method === 'POST'
+        ? { run: { runId: 'run-test', output: { version: 1 } } }
+        : { project: { updatedAt: '2026-11-06T00:00:00.000Z' } } };
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext([...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'requestAgent', 'saveProduct'].map(declaration), 'globalThis.ui = { saveProduct, requestAgent, serializeProject };'].join('\n'), context);
+  return { context, product, inputs, calls, requests, storage };
+};
+
+test('unchanged product save preserves facts and extension data in local and server JSON without resetting downstream', async () => {
+  const { context, product, calls, requests, storage } = makeProductContext();
+  context.ui.saveProduct();
+  await context.serverSyncQueue;
+  assert.deepEqual(plain(context.productState), product);
+  const saved = JSON.parse(storage.get(context.storageKey));
+  assert.deepEqual(saved.product, product);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'PUT');
+  assert.deepEqual(requests[0].body.product, product);
+  assert.equal(saved.descriptionA, '已有 A');
+  assert.equal(saved.promptB, '已有 B');
+  assert.equal(saved.generationJobId, 'job-1');
+  assert.equal(saved.generatedResults.length, 1);
+  assert.equal(calls.some(([kind]) => kind === 'confirm' || kind === 'reset'), false);
+});
+
+test('confirmed product edits update visible fields and retain unedited facts and metadata', async () => {
+  const { context, product, inputs, calls, requests, storage } = makeProductContext();
+  inputs['#product-name'].value = ' 新商品名 ';
+  inputs['#product-subtitle'].value = ' 新卖点 ';
+  inputs['#product-description'].value = ' 新描述 ';
+  context.ui.saveProduct();
+  await context.serverSyncQueue;
+  const expected = { ...product, name: '新商品名', subtitle: '新卖点', description: '新描述' };
+  assert.deepEqual(plain(context.productState), expected);
+  assert.deepEqual(JSON.parse(storage.get(context.storageKey)).product, expected);
+  assert.deepEqual(requests[0].body.product, expected);
+  assert.deepEqual(calls.filter(([kind]) => kind === 'reset'), [['reset', 0]]);
+  assert.equal(calls.filter(([kind]) => kind === 'confirm').length, 1);
+  assert.equal(calls.filter(([kind]) => kind === 'close').length, 1);
+});
+
+test('declining product changes leaves product and downstream untouched and keeps the editor open', () => {
+  const { context, product, inputs, calls, requests, storage } = makeProductContext();
+  inputs['#product-name'].value = '未确认修改';
+  context.window.confirm = () => false;
+  context.ui.saveProduct();
+  assert.deepEqual(plain(context.productState), product);
+  assert.equal(context.progress, 4);
+  assert.equal(context.descriptionA, '已有 A');
+  assert.equal(context.promptB, '已有 B');
+  assert.equal(context.generationJobId, 'job-1');
+  assert.equal(context.generatedResults.length, 1);
+  assert.equal(storage.size, 0);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(calls, []);
+});
+
+test('saved product facts remain in later Agent input and a locally restored save', async () => {
+  const { context, product, requests, storage } = makeProductContext();
+  context.ui.saveProduct();
+  await context.serverSyncQueue;
+  const restored = makeProductContext();
+  restored.context.productState = JSON.parse(storage.get(context.storageKey)).product;
+  restored.context.ui.saveProduct();
+  await restored.context.serverSyncQueue;
+  await restored.context.ui.requestAgent('description_a');
+  const agentRequest = restored.requests.find((request) => request.method === 'POST');
+  assert.equal(agentRequest.url, '/api/projects/test/agent-runs');
+  assert.deepEqual(agentRequest.body.product, product);
+  assert.deepEqual(restored.requests[0].body.product, requests[0].body.product);
+});
+
 test('A confirmation and draft collection read filled A fields independently of C', () => {
   const { context, inputs } = makeAContext();
   assert.deepEqual(plain(context.ui.validateDescriptionAConfirmation(context.descriptionA)), []);

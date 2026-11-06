@@ -985,6 +985,7 @@
       };
       const saveProduct = () => {
         const nextProduct = {
+          ...productState,
           name: document.querySelector('#product-name')?.value.trim() || productState.name,
           subtitle: document.querySelector('#product-subtitle')?.value.trim() || productState.subtitle,
           description: document.querySelector('#product-description')?.value.trim() || productState.description,
