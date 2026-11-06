@@ -991,3 +991,12 @@ h1 { font-size: 24px; line-height: 1.25; }
   .asset-library-toolbar { grid-template-columns: 1fr; }
   .asset-library-grid { grid-template-columns: 1fr; }
 }
+
+/* A brief validation and reference upload feedback */
+.a-field-required { margin-left: 8px; color: #766f62; font-size: 11px; font-weight: 400; }
+.a-field-required[hidden], .a-field-error[hidden], .a-image-feedback[hidden] { display: none; }
+.a-field-error { display: block; margin-top: 5px; color: #a24632; font-size: 12px; line-height: 1.6; }
+.detail-content [aria-invalid="true"] { border-color: #b95d46; }
+.detail-content [aria-invalid="true"]:focus { outline-color: #c88874; }
+.a-image-feedback { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: #f4f1e7; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.a-image-feedback.is-error { color: #8f3c2b; background: #fff0e9; }

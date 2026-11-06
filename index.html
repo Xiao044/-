@@ -205,6 +205,7 @@
       let acceptedASnapshot;
       let activeAOperation = null;
       let pendingAConfirmation = null;
+      let aImageFeedback = null;
       let descriptionAStructured = {};
       let agentWarnings = [];
       let descriptionADraft = null;
@@ -505,26 +506,79 @@
           showToast(error.message || '图片上传失败，已保留本地预览');
         } finally { URL.revokeObjectURL(previewUrl); }
       };
+      const refreshAImageFeedback = () => {
+        const host = detailContents.a.querySelector('[data-a-image-feedback]');
+        if (!host) return;
+        const feedback = aImageFeedback?.projectId === projectId && aImageFeedback.session === projectSession ? aImageFeedback : null;
+        host.hidden = !feedback;
+        host.textContent = feedback?.message || '';
+        host.classList.toggle('is-error', feedback?.status === 'error');
+        const input = detailContents.a.querySelector('#a-reference-image');
+        input?.setAttribute('aria-invalid', String(feedback?.status === 'error'));
+      };
+      const setAImageFeedback = (status, message) => {
+        aImageFeedback = { projectId, session: projectSession, status, message };
+        refreshAImageFeedback();
+      };
+      const refreshAImagePreview = () => {
+        const host = detailContents.a.querySelector('[data-a-image-preview]');
+        if (!host) return;
+        host.innerHTML = aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : '';
+      };
+      const isAImageUploadCurrent = (operation) => activeAOperation === operation && operation.projectId === projectId
+        && operation.routeUrl === projectApiUrl && operation.session === projectSession && operation.runId === currentAgentRunId
+        && operation.inputSignature === agentInputSignature() && operation.originalImageUrl === aReferenceImageUrl;
       const uploadABriefImage = async (file) => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
-        if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
-        if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
-        if (progress > 2) {
-          const accepted = window.confirm('更换 A 版参考图会影响提示词 B 和生成结果。是否清除下游内容并继续？');
-          if (!accepted) return;
-        }
-        showToast('正在上传 A 版参考图');
+        if (!file) return;
+        if (activeAOperation || pendingAConfirmation || agentBusy || interrupted) { showToast('请等待当前操作完成后再上传参考图'); return; }
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { setAImageFeedback('error', '请选择 PNG、JPEG 或 WebP 图片，A 版文字可继续保存'); return; }
+        if (file.size > 8 * 1024 * 1024) { setAImageFeedback('error', '参考图不能超过 8MB，A 版文字可继续保存'); return; }
+        const clearDownstream = progress > 2;
+        if (clearDownstream && !window.confirm('更换 A 版参考图会影响提示词 B 和生成结果。是否清除下游内容并继续？')) return;
+        const operation = { ...captureAOperation(), originalImageUrl: aReferenceImageUrl };
+        setAOperation(operation);
+        setAImageFeedback('uploading', '正在上传参考图；可继续编辑文字，上传结束后再保存或确认 A');
+        let binding = false;
         try {
-          const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+          const response = await fetch(`${operation.routeUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+          if (!isAImageUploadCurrent(operation)) return;
           const payload = await response.json().catch(() => ({}));
-          if (!response.ok || !payload.url) throw new Error(payload.error || 'A 版参考图上传失败');
-          if (progress > 2) resetDownstream(2);
+          if (!isAImageUploadCurrent(operation)) return;
+          if (!response.ok) {
+            setAImageFeedback('error', response.status === 413 ? '参考图超过上传限制，请选择不超过 8MB 的图片；A 版文字可继续保存' : response.status === 415 ? '参考图格式不受支持，请选择 PNG、JPEG 或 WebP；A 版文字可继续保存' : '参考图上传失败，请重新选择图片重试；A 版文字和原参考图已保留');
+            return;
+          }
+          const uploadPrefix = `/uploads/${encodeURIComponent(operation.projectId)}/`;
+          if (typeof payload.url !== 'string' || !payload.url.startsWith(uploadPrefix) || !/^[A-Za-z0-9_.-]+$/.test(payload.url.slice(uploadPrefix.length)) || payload.url.includes('..')) {
+            setAImageFeedback('error', '未收到有效的参考图地址，请重新选择图片重试；A 版文字已保留');
+            return;
+          }
+          await serverSyncQueue;
+          if (!isAImageUploadCurrent(operation)) return;
+          operation.content = editorAContent();
+          operation.committing = true;
+          refreshAConfirmationState();
+          binding = true;
+          const candidate = clearDownstream ? confirmedAProject(acceptedASnapshot, true) : serializeProject();
+          candidate.aReferenceImageUrl = payload.url;
+          if (!await strictAProjectSave(operation, candidate) || !isAImageUploadCurrent(operation)) return;
+          if (clearDownstream) { resetDownstream(2); generationResendSourceJobId = ''; }
           aReferenceImageUrl = payload.url;
           persistState();
-          await syncProject();
-          showToast('A 版参考图已上传');
-          openDetail('a', false);
-        } catch (error) { showToast(error.message || 'A 版参考图上传失败'); }
+          refreshAImagePreview();
+          setAImageFeedback('success', '参考图已上传并保存；A 版文字保持原样');
+          showToast('A 版参考图已上传并保存');
+        } catch (error) {
+          if (isAImageUploadCurrent(operation)) setAImageFeedback('error', binding
+            ? '参考图已上传，但未能保存到项目；原参考图与下游已保留，请重新选择图片重试，A 版文字可继续保存'
+            : '无法连接上传服务，请检查网络后重新选择图片；A 版文字和原参考图已保留');
+        } finally {
+          if (activeAOperation === operation) {
+            if (!isAImageUploadCurrent(operation) && aImageFeedback?.status === 'uploading') aImageFeedback = null;
+            setAOperation(null);
+            refreshAImageFeedback();
+          }
+        }
       };
       const restoreProjectFromServer = async () => {
         try {
@@ -885,6 +939,8 @@
         clearAgentFailure();
         activeAOperation = null;
         pendingAConfirmation = null;
+        aImageFeedback = null;
+        refreshAImageFeedback();
         if (activeAgentRequest) activeAgentRequest.cancelled = true;
         activeAgentRequest = null;
         setAgentBusy(false);
@@ -1715,7 +1771,8 @@
         revealDetail(detail);
         node.classList.add('is-expanded');
         if (stepName === 'a') {
-          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<textarea id="description-editor">${escapeHtml(descriptionA)}</textarea></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp"></label>${aReferenceImageUrl ? `<div class="prompt-attachment-preview"><img src="${escapeHtml(new URL(aReferenceImageUrl, window.location.href).href)}" alt="A 版参考图"><span>已绑定 A 版参考图</span></div>` : ''}<div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          // Keep the live A inputs stable while a save, confirmation or reference binding owns them.
+          if (!activeAOperation || !host.querySelector('#description-editor')) host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<span class="a-field-required" data-a-required="descriptionA">确认时必填</span><textarea id="description-editor" aria-invalid="false" aria-describedby="a-field-descriptionA-error">${escapeHtml(descriptionA)}</textarea><span class="a-field-error" id="a-field-descriptionA-error" data-a-field-error="descriptionA" role="alert" hidden></span></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择 A 版参考图" aria-describedby="a-image-feedback"></label><p class="a-image-feedback" id="a-image-feedback" data-a-image-feedback role="status" hidden></p><div data-a-image-preview></div><div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
           host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
@@ -1726,6 +1783,7 @@
           if (resultGenerated) renderResults();
         }
         refreshAConfirmationState();
+        if (stepName === 'a') { refreshAImageFeedback(); refreshAImagePreview(); }
         if (shouldScroll) {
           const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
           node.scrollIntoView({ behavior: scrollBehavior, block: 'start' });
@@ -1764,7 +1822,7 @@
         const isEdited = Object.prototype.hasOwnProperty.call(descriptionAFieldEdits || {}, definition.key);
         const value = isEdited ? descriptionAFieldEdits[definition.key] : field.value;
         const source = isEdited ? '待保存修改' : field.source === 'user' ? '用户资料' : 'Agent 整理';
-        return `<label class="agent-draft-field"><span class="agent-draft-field-heading"><span>${definition.label}</span><small class="agent-field-source${isEdited ? ' is-unsaved' : ''}" data-agent-field-source="${definition.key}">${source}</small></span><textarea data-agent-field="${definition.key}" rows="${definition.rows}" aria-label="${definition.label}">${escapeHtml(draftFieldText(definition, value))}</textarea></label>`;
+        return `<label class="agent-draft-field"><span class="agent-draft-field-heading"><span>${definition.label}<span class="a-field-required" data-a-required="${definition.key}">确认时必填</span></span><small class="agent-field-source${isEdited ? ' is-unsaved' : ''}" data-agent-field-source="${definition.key}">${source}</small></span><textarea data-agent-field="${definition.key}" rows="${definition.rows}" aria-label="${definition.label}" aria-invalid="false" aria-describedby="a-field-${definition.key}-error">${escapeHtml(draftFieldText(definition, value))}</textarea><span class="a-field-error" id="a-field-${definition.key}-error" data-a-field-error="${definition.key}" role="alert" hidden></span></label>`;
       }).join('')}</section>`;
       const parseDraftFieldInput = (definition, value) => definition.array
         ? String(value ?? '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
@@ -2419,6 +2477,9 @@
         return !baseline || JSON.stringify(editorAContent()) !== JSON.stringify(baseline);
       };
       const refreshAConfirmationState = () => {
+        refreshAFieldRequirements();
+        const imageInput = detailContents.a.querySelector('#a-reference-image');
+        if (imageInput) imageInput.disabled = Boolean(activeAOperation || pendingAConfirmation || agentBusy || interrupted);
         const pending = isAConfirmationPending();
         document.querySelectorAll('[data-a-confirmation-state]').forEach((notice) => {
           notice.hidden = !pending;
@@ -2576,9 +2637,43 @@
           if (activeAOperation === operation) setAOperation(null);
         }
       };
+      const requiresASemanticValidation = () => {
+        const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
+        return !run?.accepted && !run?.legacyCompatibility?.allowIncompleteSemanticMinimum;
+      };
+      const aFieldInput = (key) => detailContents.a.querySelector(key === 'descriptionA' ? '#description-editor' : `[data-agent-field="${key}"]`);
+      const setAFieldError = (key, message = '') => {
+        const input = aFieldInput(key);
+        input?.setAttribute?.('aria-invalid', String(Boolean(message)));
+        const error = detailContents.a.querySelector(`[data-a-field-error="${key}"]`);
+        if (error) { error.textContent = message; error.hidden = !message; }
+      };
+      const showAFieldErrors = (errors) => {
+        const messages = { descriptionA: 'A 版原始文本不能为空', productFactsSummary: '请补充商品事实摘要', scene: '请补充场景', mustKeep: '请至少填写一条必须保留项' };
+        let first;
+        for (const [key, message] of Object.entries(messages)) {
+          const invalid = errors.includes(message);
+          setAFieldError(key, invalid ? message : '');
+          if (invalid && !first) first = aFieldInput(key);
+        }
+        first?.focus();
+        first?.scrollIntoView?.({ block: 'center', behavior: 'auto' });
+      };
+      const clearCorrectedAFieldError = (key) => {
+        const messages = { descriptionA: 'A 版原始文本不能为空', productFactsSummary: '请补充商品事实摘要', scene: '请补充场景', mustKeep: '请至少填写一条必须保留项' };
+        if (!validateDescriptionAConfirmation(detailContents.a.querySelector('#description-editor')?.value.trim() || '').includes(messages[key])) setAFieldError(key);
+      };
+      const refreshAFieldRequirements = () => {
+        const required = requiresASemanticValidation();
+        for (const key of ['descriptionA', ...agentDraftFieldDefinitions.map((field) => field.key)]) {
+          const isRequired = required && ['descriptionA', 'productFactsSummary', 'scene', 'mustKeep'].includes(key);
+          aFieldInput(key)?.setAttribute?.('aria-required', String(isRequired));
+          const marker = detailContents.a.querySelector(`[data-a-required="${key}"]`);
+          if (marker) marker.hidden = !isRequired;
+        }
+      };
       const validateDescriptionAConfirmation = (nextDescription) => {
-        const currentRun = agentRunHistory.find((item) => item.runId === currentAgentRunId);
-        if (currentRun?.accepted || currentRun?.legacyCompatibility?.allowIncompleteSemanticMinimum) return [];
+        if (!requiresASemanticValidation()) return [];
         const fieldValue = (key) => detailContents.a.querySelector(`[data-agent-field="${key}"]`)?.value.trim() || '';
         const errors = [];
         if (!nextDescription) errors.push('A 版原始文本不能为空');
@@ -2637,6 +2732,7 @@
         resolveAcceptedASnapshot();
         const operation = captureAOperation();
         const semanticErrors = validateDescriptionAConfirmation(operation.content.rawText);
+        showAFieldErrors(semanticErrors);
         if (semanticErrors.length) { showToast(semanticErrors[0]); return; }
         operation.clearDownstream = hasADownstream() && isAConfirmationPending();
         if (operation.clearDownstream) {
@@ -3071,7 +3167,7 @@
           return;
         }
         if (event.target.id === 'result-upload-input') uploadGeneratedResults(event.target.files);
-        if (event.target.id === 'a-reference-image') uploadABriefImage(event.target.files?.[0]);
+        if (event.target.id === 'a-reference-image') { const file = event.target.files?.[0]; event.target.value = ''; uploadABriefImage(file); }
       });
 
       window.addEventListener('message', (event) => {
@@ -3213,11 +3309,12 @@
         }
       });
       workflowCanvas.addEventListener('input', (event) => {
-        if (event.target.id === 'description-editor') { refreshAConfirmationState(); return; }
+        if (event.target.id === 'description-editor') { clearCorrectedAFieldError('descriptionA'); refreshAConfirmationState(); return; }
         const input = event.target.closest('[data-agent-field]');
         if (!input) return;
         const key = input.dataset.agentField;
         descriptionAFieldEdits[key] = input.value;
+        clearCorrectedAFieldError(key);
         refreshDraftFieldSource(key);
         refreshAConfirmationState();
         persistState();
