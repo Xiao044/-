@@ -972,23 +972,66 @@
       const renderProduct = () => {
         document.querySelector('.product-details h3').textContent = productState.name;
         document.querySelector('#canvas-product-name').textContent = productState.name;
-        document.querySelectorAll('.product-subtitle').forEach((node) => { node.textContent = productState.subtitle; });
-        document.querySelector('.product-note p').textContent = `“${productState.description}”`;
+        document.querySelectorAll('.product-subtitle').forEach((node) => { node.textContent = productState.subtitle || '未填写商品卖点'; });
+        document.querySelector('.product-note p').textContent = productState.description ? `“${productState.description}”` : '未填写商品描述';
         document.querySelectorAll('.product-visual img, .inspector-asset img').forEach((image) => {
           image.src = productState.imageUrl || './assets/pearl-necklace.svg';
           image.alt = `${productState.name}商品图片`;
         });
       };
       const renderProjectName = () => { document.querySelector('.breadcrumb strong').textContent = projectName; };
+      const productFieldDefinitions = [
+        { key: 'name', label: '商品名称', limit: 300, required: true },
+        { key: 'subtitle', label: '一句话卖点', limit: 500, required: false },
+        { key: 'description', label: '商品描述', limit: 12000, required: false }
+      ];
+      const productFieldError = (definition, rawValue) => {
+        if (definition.required && !rawValue.trim()) return `请填写${definition.label}`;
+        if (rawValue.length > definition.limit) return `${definition.label}不能超过 ${definition.limit} 个字符`;
+        return '';
+      };
+      const showProductFieldError = (definition, message) => {
+        const input = modalBody.querySelector(`#product-${definition.key}`);
+        const error = modalBody.querySelector(`#product-${definition.key}-error`);
+        input?.setAttribute('aria-invalid', message ? 'true' : 'false');
+        if (error) { error.textContent = message; error.hidden = !message; }
+      };
+      const readProductEditor = () => {
+        const values = {};
+        let firstInvalid = null;
+        for (const definition of productFieldDefinitions) {
+          const input = modalBody.querySelector(`#product-${definition.key}`);
+          if (!input) return null;
+          const message = productFieldError(definition, input.value);
+          showProductFieldError(definition, message);
+          if (message && !firstInvalid) firstInvalid = input;
+          values[definition.key] = input.value.trim();
+        }
+        if (firstInvalid) { firstInvalid.focus(); return null; }
+        return values;
+      };
+      const refreshProductFieldValidation = (input) => {
+        const definition = productFieldDefinitions.find((field) => input.id === `product-${field.key}`);
+        if (!definition || input.getAttribute('aria-invalid') !== 'true') return false;
+        showProductFieldError(definition, productFieldError(definition, input.value));
+        return true;
+      };
       const openProductEditor = () => {
-        openModal('编辑商品资料', `<label class="modal-field">商品名称<input id="product-name" value="${escapeHtml(productState.name)}"></label><label class="modal-field">一句话卖点<input id="product-subtitle" value="${escapeHtml(productState.subtitle)}"></label><label class="modal-field">商品描述<textarea id="product-description">${escapeHtml(productState.description)}</textarea></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
+        const fields = productFieldDefinitions.map((definition) => {
+          const id = `product-${definition.key}`;
+          const attributes = `id="${id}" aria-label="${definition.label}" maxlength="${definition.limit}"${definition.required ? ' required' : ''} aria-describedby="${id}-hint ${id}-error" aria-invalid="false"`;
+          const value = escapeHtml(productState[definition.key] ?? '');
+          const control = definition.key === 'description' ? `<textarea ${attributes}>${value}</textarea>` : `<input ${attributes} value="${value}">`;
+          return `<label class="modal-field">${definition.label}<small class="modal-field-requirement">${definition.required ? '必填' : '选填'}</small>${control}<small class="modal-field-hint" id="${id}-hint">最多 ${definition.limit} 个字符${definition.required ? '' : '，可留空'}</small><span class="modal-field-error" id="${id}-error" role="alert" hidden></span></label>`;
+        }).join('');
+        openModal('编辑商品资料', `${fields}<div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
       };
       const saveProduct = () => {
+        const values = readProductEditor();
+        if (!values) return;
         const nextProduct = {
           ...productState,
-          name: document.querySelector('#product-name')?.value.trim() || productState.name,
-          subtitle: document.querySelector('#product-subtitle')?.value.trim() || productState.subtitle,
-          description: document.querySelector('#product-description')?.value.trim() || productState.description,
+          ...values,
           imageUrl: productState.imageUrl
         };
         const productChanged = Object.keys(nextProduct).some((key) => nextProduct[key] !== productState[key]);
@@ -2922,6 +2965,7 @@
         }
       });
       modal.addEventListener('input', (event) => {
+        if (refreshProductFieldValidation(event.target)) return;
         const filter = event.target.closest('[data-task-filter]');
         if (filter) {
           taskCenterFilters[filter.dataset.taskFilter] = filter.value;

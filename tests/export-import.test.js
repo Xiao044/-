@@ -199,18 +199,33 @@ test('asset upload rejects a project directory symlink escape', async (t) => {
 test('concurrent project PUT and import are serialized as complete mutations', async (t) => {
   const server = await startServer(t);
   const importedPayload = importPayload('demo');
+  const putPayload = { projectId: 'demo', marker: 'put-after-import', product: { name: 'put' }, descriptionA: 'A put', promptB: 'B put' };
   const importRequest = json(server.base, '/api/projects/demo/import', { method: 'POST', body: JSON.stringify(importedPayload) });
-  const putRequest = json(server.base, '/api/projects/demo', { method: 'PUT', body: JSON.stringify({ projectId: 'demo', marker: 'put-after-import', product: { name: 'put' }, descriptionA: 'A put', promptB: 'B put' }) });
+  const putRequest = json(server.base, '/api/projects/demo', { method: 'PUT', body: JSON.stringify(putPayload) });
   const [importResponse, putResponse] = await Promise.all([importRequest, putRequest]);
   assert.equal(importResponse.status, 200);
   assert.equal(putResponse.status, 200);
+  const importedProject = (await importResponse.json()).project;
   const projectResponse = await json(server.base, '/api/projects/demo');
   const finalProject = (await projectResponse.json()).project;
-  assert.equal(finalProject.marker, 'put-after-import');
+  // Concurrent HTTP requests may reach the mutation queue in either order.
+  // Both outcomes must be a complete serial mutation, not a mix of fields.
+  const withoutUpdatedAt = ({ updatedAt, ...businessState }) => businessState;
+  const expectedProject = Object.hasOwn(finalProject, 'marker')
+    ? { ...importedProject, ...putPayload }
+    : importedProject;
+  assert.deepEqual(withoutUpdatedAt(finalProject), withoutUpdatedAt(expectedProject));
+  assert.equal(finalProject.customField.keep, true);
+  assert.ok(Number.isFinite(Date.parse(finalProject.updatedAt)));
   const versions = await (await json(server.base, '/api/projects/demo/versions')).json();
+  assert.equal(versions.versions.length, 1);
   assert.equal(versions.versions[0].projectId, 'demo');
   const jobs = await (await json(server.base, '/api/projects/demo/generation-jobs')).json();
+  assert.equal(jobs.jobs.length, 1);
   assert.equal(jobs.jobs[0].jobId, 'job-import-1');
+  const assets = await (await json(server.base, '/api/projects/demo/result-assets')).json();
+  assert.equal(assets.assets.length, 1);
+  assert.equal(assets.assets[0].assetId, 'asset-import-1');
 });
 
 test('agent-run mutation and import share project mutation serialization', async (t) => {

@@ -296,6 +296,12 @@ h1 { font-size: 31px; font-weight: 600; letter-spacing: 1px; line-height: 1.45; 
 .modal-field input:focus, .modal-field textarea:focus { outline: 2px solid #dfcd88; outline-offset: 1px; border-color: #d4bd70; }
 .modal-field select { display: block; width: 100%; margin-top: 7px; padding: 10px 11px; border: 1px solid #e6dfcd; border-radius: 7px; background: #fffef9; color: #5e5c4f; font: inherit; font-size: 12px; }
 .modal-field select:focus { outline: 2px solid #dfcd88; outline-offset: 1px; border-color: #d4bd70; }
+.modal-field-requirement { margin-left: 7px; color: #9b917b; font-size: 11px; }
+.modal-field-hint { display: block; margin-top: 5px; color: #9b917b; font-size: 11px; }
+.modal-field-error { display: block; margin-top: 5px; color: #a24632; font-size: 11px; line-height: 1.6; }
+.modal-field-error[hidden] { display: none; }
+.modal-field [aria-invalid="true"] { border-color: #b95d46; }
+.modal-field [aria-invalid="true"]:focus { outline-color: #c88874; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 19px; }
 .project-import-warnings { margin: 0; padding: 0; list-style: none; border-top: 1px solid #eee8d6; }
 .project-import-warnings li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee8d6; color: #81765f; font-size: 12px; line-height: 1.6; }

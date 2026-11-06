@@ -54,8 +54,14 @@ const makeProductContext = () => {
     facts: { material: '黄铜', color: '金色', size: '8mm', batch: 'B-01' },
     material: '黄铜', color: '金色', size: '8mm', category: '首饰', brand: '自有品牌', extension: { sku: 'sku-01', tags: ['首发'] }
   };
-  const inputs = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}`, { value: product[key] }]));
   const calls = [], requests = [], storage = new Map();
+  const inputs = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}`, {
+    id: `product-${key}`, value: product[key], attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    focus() { calls.push(['focus', key]); }
+  }]));
+  const errors = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}-error`, { textContent: '', hidden: true }]));
   const context = {
     productState: plain(product), progress: 4, generated: true, interrupted: false,
     descriptionA: '已有 A', promptB: '已有 B', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
@@ -72,7 +78,9 @@ const makeProductContext = () => {
       localStorage: { setItem: (key, value) => storage.set(key, value), getItem: (key) => storage.get(key) ?? null },
       confirm: () => { calls.push(['confirm']); return true; }
     },
-    document: { querySelector: (selector) => inputs[selector] || null },
+    document: { querySelector: (selector) => inputs[selector] || errors[selector] || null },
+    modalBody: { querySelector: (selector) => inputs[selector] || errors[selector] || null },
+    escapeHtml, openModal: (title, html) => calls.push(['open', title, html]),
     renderProduct: () => calls.push(['render']), closeModal: () => calls.push(['close']), showToast: (message) => calls.push(['toast', message]),
     resetDownstream: (step) => { calls.push(['reset', step]); context.progress = 1; context.descriptionA = ''; context.promptB = ''; context.generatedResults = []; },
     ensureProjectOnServer: async () => {},
@@ -84,8 +92,9 @@ const makeProductContext = () => {
     }
   };
   vm.createContext(context);
-  vm.runInContext([...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'requestAgent', 'saveProduct'].map(declaration), 'globalThis.ui = { saveProduct, requestAgent, serializeProject };'].join('\n'), context);
-  return { context, product, inputs, calls, requests, storage };
+  const productHelpers = ['productFieldDefinitions', 'productFieldError', 'showProductFieldError', 'readProductEditor', 'refreshProductFieldValidation'].filter((name) => source.includes(`      const ${name} =`));
+  vm.runInContext([...productHelpers.map(declaration), ...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'requestAgent', 'openProductEditor', 'saveProduct'].map(declaration), 'globalThis.ui = { saveProduct, requestAgent, serializeProject, openProductEditor };'].join('\n'), context);
+  return { context, product, inputs, errors, calls, requests, storage };
 };
 
 test('unchanged product save preserves facts and extension data in local and server JSON without resetting downstream', async () => {
@@ -150,6 +159,129 @@ test('saved product facts remain in later Agent input and a locally restored sav
   assert.equal(agentRequest.url, '/api/projects/test/agent-runs');
   assert.deepEqual(agentRequest.body.product, product);
   assert.deepEqual(restored.requests[0].body.product, requests[0].body.product);
+});
+
+test('blank product name reports the field before side effects and allows a corrected retry', async () => {
+  const { context, product, inputs, errors, calls, requests, storage } = makeProductContext();
+  inputs['#product-name'].value = '   ';
+  inputs['#product-subtitle'].value = '';
+  context.ui.saveProduct();
+  assert.deepEqual(plain(context.productState), product);
+  assert.equal(context.progress, 4);
+  assert.equal(context.descriptionA, '已有 A');
+  assert.equal(context.promptB, '已有 B');
+  assert.equal(storage.size, 0);
+  assert.equal(requests.length, 0);
+  assert.match(errors['#product-name-error'].textContent, /请填写商品名称/);
+  assert.equal(inputs['#product-name'].attributes['aria-invalid'], 'true');
+  assert.deepEqual(calls, [['focus', 'name']]);
+  assert.equal(inputs['#product-subtitle'].value, '');
+  inputs['#product-name'].value = ' 修正商品名 ';
+  context.ui.saveProduct();
+  await context.serverSyncQueue;
+  assert.equal(context.productState.name, '修正商品名');
+  assert.equal(context.productState.subtitle, '');
+  assert.equal(errors['#product-name-error'].hidden, true);
+  assert.equal(inputs['#product-name'].attributes['aria-invalid'], 'false');
+  assert.equal(calls.filter(([kind]) => kind === 'reset').length, 1);
+});
+
+test('optional product fields clear through local and server saves, reopen and later Agent input', async () => {
+  const { context, product, inputs, requests, storage, calls } = makeProductContext();
+  inputs['#product-subtitle'].value = '  ';
+  inputs['#product-description'].value = '\n ';
+  context.ui.saveProduct();
+  await context.serverSyncQueue;
+  const expected = { ...product, subtitle: '', description: '' };
+  assert.deepEqual(plain(context.productState), expected);
+  assert.deepEqual(JSON.parse(storage.get(context.storageKey)).product, expected);
+  assert.deepEqual(requests[0].body.product, expected);
+  context.ui.openProductEditor();
+  const markup = calls.find(([kind]) => kind === 'open')[2];
+  assert.match(markup, /id="product-subtitle"[^>]*value=""/);
+  assert.match(markup, /id="product-description"[^>]*><\/textarea>/);
+  assert.match(markup, /aria-label="商品名称" maxlength="300" required/);
+  assert.match(markup, /aria-describedby="product-name-hint product-name-error"/);
+  await context.ui.requestAgent('description_a');
+  assert.deepEqual(requests.find((request) => request.method === 'POST').body.product, expected);
+  const restored = makeProductContext();
+  restored.context.productState = JSON.parse(storage.get(context.storageKey)).product;
+  restored.inputs['#product-subtitle'].value = '';
+  restored.inputs['#product-description'].value = '';
+  restored.context.ui.saveProduct();
+  await restored.context.serverSyncQueue;
+  assert.deepEqual(restored.requests[0].body.product, expected);
+});
+
+test('product validation input delegation clears corrected field errors before saving', () => {
+  const { context, inputs, errors, requests } = makeProductContext();
+  inputs['#product-name'].value = '';
+  context.ui.saveProduct();
+  assert.equal(errors['#product-name-error'].hidden, false);
+  context.modal = { addEventListener: (_event, handler) => { context.inputHandler = handler; } };
+  const start = source.indexOf("      modal.addEventListener('input'");
+  const end = source.indexOf("      modal.addEventListener('change'", start);
+  assert.ok(start > 0 && end > start);
+  vm.runInContext(source.slice(start, end), context);
+  inputs['#product-name'].value = '修正名称';
+  context.inputHandler({ target: inputs['#product-name'] });
+  assert.equal(inputs['#product-name'].attributes['aria-invalid'], 'false');
+  assert.equal(errors['#product-name-error'].hidden, true);
+  assert.equal(requests.length, 0);
+});
+
+test('empty product display hints remain presentation only', () => {
+  const productState = { name: '项链', subtitle: '', description: '', imageUrl: '/uploads/product.png', facts: { material: '黄铜' } };
+  const name = { textContent: '' }, caption = { textContent: '' }, subtitle = { textContent: '' }, description = { textContent: '' };
+  const context = {
+    productState,
+    document: {
+      querySelector: (selector) => ({ '.product-details h3': name, '#canvas-product-name': caption, '.product-note p': description }[selector]),
+      querySelectorAll: (selector) => selector === '.product-subtitle' ? [subtitle] : []
+    }
+  };
+  vm.runInNewContext(declaration('renderProduct') + '\nrenderProduct();', context);
+  assert.equal(subtitle.textContent, '未填写商品卖点');
+  assert.equal(description.textContent, '未填写商品描述');
+  assert.equal(productState.subtitle, '');
+  assert.equal(productState.description, '');
+});
+
+for (const [key, limit] of [['name', 300], ['subtitle', 500], ['description', 12000]]) {
+  test(`product ${key} rejects raw over-limit input and saves the exact ${limit}-character boundary`, async () => {
+    const { context, product, inputs, errors, calls, requests, storage } = makeProductContext();
+    inputs[`#product-${key}`].value = ' ' + '字'.repeat(limit);
+    context.ui.saveProduct();
+    assert.deepEqual(plain(context.productState), product);
+    assert.equal(storage.size, 0);
+    assert.equal(requests.length, 0);
+    assert.equal(calls.some(([kind]) => ['confirm', 'reset', 'close'].includes(kind)), false);
+    assert.match(errors[`#product-${key}-error`].textContent, new RegExp(String(limit)));
+    assert.equal(inputs[`#product-${key}`].value.length, limit + 1);
+    inputs[`#product-${key}`].value = '字'.repeat(limit);
+    context.ui.saveProduct();
+    await context.serverSyncQueue;
+    assert.equal(context.productState[key], '字'.repeat(limit));
+    assert.deepEqual(plain(context.productState.facts), product.facts);
+    assert.equal(errors[`#product-${key}-error`].hidden, true);
+  });
+}
+
+test('declining valid optional-field clearing preserves product, downstream and edit inputs', () => {
+  const { context, product, inputs, requests, storage, calls } = makeProductContext();
+  inputs['#product-subtitle'].value = '';
+  inputs['#product-description'].value = '';
+  context.window.confirm = () => false;
+  context.ui.saveProduct();
+  assert.deepEqual(plain(context.productState), product);
+  assert.equal(context.progress, 4);
+  assert.equal(context.descriptionA, '已有 A');
+  assert.equal(context.promptB, '已有 B');
+  assert.equal(inputs['#product-subtitle'].value, '');
+  assert.equal(inputs['#product-description'].value, '');
+  assert.equal(requests.length, 0);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(calls, []);
 });
 
 test('A confirmation and draft collection read filled A fields independently of C', () => {
