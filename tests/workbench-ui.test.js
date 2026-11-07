@@ -34,7 +34,7 @@ const makeAContext = () => {
   const context = {
     detailContents: { a: aHost, c: cHost }, detailContent: cHost,
     document: { querySelector: (selector) => selector === '#description-editor' ? raw : null, querySelectorAll: () => [] },
-    acceptedASnapshot: undefined, activeAOperation: null, pendingAConfirmation: null, agentBusy: false, interrupted: false, pendingSceneChange: null,
+    descriptionARawEdit: null, acceptedASnapshot: undefined, activeAOperation: null, pendingAConfirmation: null, agentBusy: false, interrupted: false, pendingSceneChange: null,
     projectId: 'test', projectSession: 0, modalSession: 0, serverSyncQueue: null, pendingProjectSync: null, invalidatedGenerationJobs: new Set(),
     promptB: '', generationJobId: '', generatedResults: [], resultGenerated: false,
     descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: {}, descriptionAFieldEdits: {},
@@ -48,7 +48,7 @@ const makeAContext = () => {
     markStepComplete() {}, setCurrentStep() {}, unlockCard: (name) => calls.push(['unlock', name]), setStatus() {}, openDetail() {}
   };
   vm.createContext(context);
-  vm.runInContext([definitions, ...['parseDraftFieldInput', 'requiresASemanticValidation', 'aFieldInput', 'setAFieldError', 'showAFieldErrors', 'clearCorrectedAFieldError', 'refreshAFieldRequirements',  'refreshDraftFieldSource', 'refreshSavedDraftFieldSources', 'collectAgentDraftPatch', 'normalizeAContent', 'storedAContent', 'editorAContent', 'resolveAcceptedASnapshot', 'hasADownstream', 'isAConfirmationPending', 'refreshAConfirmationState', 'captureAOperation', 'isAOperationCurrent', 'setAOperation', 'strictAProjectSave', 'confirmedAProject', 'saveAgentDraftOperation', 'confirmDescriptionOperation', 'validateDescriptionAConfirmation', 'saveAgentDraftEdits', 'confirmDescription'].map(declaration), 'globalThis.ui = { collectAgentDraftPatch, validateDescriptionAConfirmation, refreshDraftFieldSource, refreshSavedDraftFieldSources, saveAgentDraftEdits, confirmDescription };'].join('\n'), context);
+  vm.runInContext([definitions, ...['readAEditorRawText', 'replaceAEditorRaw', 'clearSavedARawEdit', 'parseDraftFieldInput', 'requiresASemanticValidation', 'aFieldInput', 'setAFieldError', 'showAFieldErrors', 'clearCorrectedAFieldError', 'refreshAFieldRequirements',  'refreshDraftFieldSource', 'refreshSavedDraftFieldSources', 'collectAgentDraftPatch', 'normalizeAContent', 'storedAContent', 'editorAContent', 'resolveAcceptedASnapshot', 'hasADownstream', 'isAConfirmationPending', 'refreshAConfirmationState', 'captureAOperation', 'isAOperationCurrent', 'setAOperation', 'strictAProjectSave', 'confirmedAProject', 'saveAgentDraftOperation', 'confirmDescriptionOperation', 'validateDescriptionAConfirmation', 'saveAgentDraftEdits', 'confirmDescription'].map(declaration), 'globalThis.ui = { collectAgentDraftPatch, validateDescriptionAConfirmation, refreshDraftFieldSource, refreshSavedDraftFieldSources, saveAgentDraftEdits, confirmDescription };'].join('\n'), context);
   return { context, inputs, badges, confirmButton, calls, raw };
 };
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -68,7 +68,7 @@ const makeProductContext = () => {
   }]));
   const errors = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}-error`, { textContent: '', hidden: true }]));
   const context = {
-    acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
+    descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
     descriptionA: '已有 A', promptB: '已有 B', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
     promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
     agentTemplateId: '', agentTemplateVersion: 0, descriptionAStructured: {}, agentWarnings: [], descriptionADraft: null,

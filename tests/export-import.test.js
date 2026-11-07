@@ -77,7 +77,7 @@ test('frontend import validates ownership, confirms replace mode, persists the r
   assert.match(indexSource, /fetch\(`\$\{importRouteUrl\}\/import`/);
   assert.match(indexSource, /JSON\.stringify\(\{ \.\.\.imported, projectId: activeProjectId, mode: 'replace' \}\)/);
   assert.match(indexSource, /importedState\.projectId !== activeProjectId/);
-  assert.match(indexSource, /window\.localStorage\.setItem\(storageKey, JSON\.stringify\(\{ \.\.\.importedState, projectId: activeProjectId \}\)\)/);
+  assert.match(indexSource, /window\.localStorage\.setItem\(storageKey, JSON\.stringify\(\{ \.\.\.importedState, descriptionARawEdit: null, projectId: activeProjectId \}\)\)/);
   assert.match(indexSource, /Array\.isArray\(payload\.warnings\)/);
   assert.match(indexSource, /UPLOAD_MISSING/);
   assert.match(indexSource, /UPLOAD_MANIFEST_MISSING/);

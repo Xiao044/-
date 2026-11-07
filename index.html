@@ -202,6 +202,7 @@
       let generated = false;
       let progress = 1;
       let descriptionA = '';
+      let descriptionARawEdit = null;
       let acceptedASnapshot;
       let activeAOperation = null;
       let pendingAConfirmation = null;
@@ -342,6 +343,7 @@
             generated,
             progress,
             descriptionA,
+            descriptionARawEdit,
             acceptedASnapshot,
             descriptionAStructured,
             agentWarnings,
@@ -385,7 +387,7 @@
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
           projectId, selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
-          descriptionA, acceptedASnapshot, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
+          descriptionA, descriptionARawEdit, acceptedASnapshot, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
           promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion },
           descriptionAStructured,
@@ -448,13 +450,14 @@
         const routeUrl = projectApiUrl, session = projectSession, restoringProjectId = projectId;
         const restoringAOperation = activeAOperation;
         const restoringAEdits = JSON.stringify(descriptionAFieldEdits);
+        const restoringRawEdit = descriptionARawEdit;
         const inputSignature = agentInputSignature(), restoringRunId = currentAgentRunId, restoringText = descriptionA;
         try {
           const response = await fetch(`${routeUrl}/agent-runs`, { cache: 'no-store' });
           if (!response.ok) return;
           const payload = await response.json();
           if (projectApiUrl !== routeUrl || projectSession !== session || projectId !== restoringProjectId
-            || activeAOperation !== restoringAOperation || activeAOperation || JSON.stringify(descriptionAFieldEdits) !== restoringAEdits
+            || activeAOperation !== restoringAOperation || activeAOperation || JSON.stringify(descriptionAFieldEdits) !== restoringAEdits || descriptionARawEdit !== restoringRawEdit
             || agentInputSignature() !== inputSignature || currentAgentRunId !== restoringRunId || descriptionA !== restoringText) return;
           agentRunHistory = Array.isArray(payload.runs) ? payload.runs : [];
           resolveAcceptedASnapshot();
@@ -581,10 +584,14 @@
         }
       };
       const restoreProjectFromServer = async () => {
+        if (descriptionARawEdit !== null) return;
+        const routeUrl = projectApiUrl, restoringProjectId = projectId, session = projectSession, rawEdit = descriptionARawEdit;
+        const isCurrent = () => routeUrl === projectApiUrl && restoringProjectId === projectId && session === projectSession && rawEdit === descriptionARawEdit;
         try {
-          const response = await fetch(projectApiUrl, { cache: 'no-store' });
-          if (!response.ok) return;
+          const response = await fetch(routeUrl, { cache: 'no-store' });
+          if (!response.ok || !isCurrent()) return;
           const serverProject = (await response.json()).project;
+          if (!isCurrent()) return;
           if (!serverProject) return;
           const localRaw = window.localStorage.getItem(storageKey);
           const localProject = localRaw ? JSON.parse(localRaw) : null;
@@ -707,7 +714,7 @@
           invalidateAgentRequest();
           pendingSceneChange = null;
           projectSession += 1;
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, projectId: activeProjectId }));
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, descriptionARawEdit: null, projectId: activeProjectId }));
           projectId = activeProjectId;
           projectApiUrl = `/api/projects/${encodeURIComponent(activeProjectId)}`;
           const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
@@ -1065,6 +1072,7 @@
             resetDownstream(1);
           }
           resolveAcceptedASnapshot();
+          replaceAEditorRaw(nextDescription);
           descriptionA = nextDescription;
           descriptionAStructured = payload.descriptionAStructured && typeof payload.descriptionAStructured === 'object' ? payload.descriptionAStructured : {};
           agentWarnings = Array.isArray(payload.warnings) ? payload.warnings : [];
@@ -1471,6 +1479,7 @@
           const value = templateValue(raw) ?? (definition.array ? [] : '');
           nextFields[definition.key] = { value, source: 'user', updatedAt: timestamp, version: Math.max(1, Number(getDraftField(definition.key)?.version) || 1) + 1 };
         }
+        replaceAEditorRaw(nextDescription);
         descriptionA = nextDescription;
         descriptionAStructured = Object.fromEntries(Object.entries(nextFields).map(([key, field]) => [key, field.value]));
         descriptionADraft = { schemaVersion: 1, rawText: nextDescription, fields: nextFields, userFacts: descriptionADraft?.userFacts || {} };
@@ -1516,10 +1525,10 @@
           if (!response.ok) throw new Error(payload.error || '版本恢复失败');
           const restoredProject = payload.project && typeof payload.project === 'object' ? payload.project : record.snapshot;
           if (!restoredProject || typeof restoredProject !== 'object') throw new Error('版本恢复未返回项目快照');
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, projectId: restoredProject.projectId || payload.projectId || projectId }));
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, descriptionARawEdit: null, projectId: restoredProject.projectId || payload.projectId || projectId }));
         } else {
           const localSnapshot = { ...(record.snapshot || record), projectId };
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, descriptionARawEdit: null, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
         }
         window.location.reload();
       };
@@ -1542,6 +1551,7 @@
         generated = false;
         interrupted = false;
         descriptionA = '';
+        replaceAEditorRaw('');
         descriptionAStructured = {};
         agentWarnings = [];
         descriptionADraft = null;
@@ -1667,7 +1677,7 @@
           document.querySelector('.agent-greeting p').textContent = '补充场景后生成描述词。';
           setStatus('等待回答');
         }
-        if (stepIndex < 2) { acceptedASnapshot = null; descriptionA = ''; descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
+        if (stepIndex < 2) { acceptedASnapshot = null; descriptionA = ''; replaceAEditorRaw(''); descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
         if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; promptBTemplateId = ''; promptBTemplateVersion = 0; commitPlatformOverrides(); }
         if (stepIndex < 4) {
           resultGenerated = false;
@@ -1772,7 +1782,7 @@
         node.classList.add('is-expanded');
         if (stepName === 'a') {
           // Keep the live A inputs stable while a save, confirmation or reference binding owns them.
-          if (!activeAOperation || !host.querySelector('#description-editor')) host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<span class="a-field-required" data-a-required="descriptionA">确认时必填</span><textarea id="description-editor" aria-invalid="false" aria-describedby="a-field-descriptionA-error">${escapeHtml(descriptionA)}</textarea><span class="a-field-error" id="a-field-descriptionA-error" data-a-field-error="descriptionA" role="alert" hidden></span></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择 A 版参考图" aria-describedby="a-image-feedback"></label><p class="a-image-feedback" id="a-image-feedback" data-a-image-feedback role="status" hidden></p><div data-a-image-preview></div><div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          if (!activeAOperation || !host.querySelector('#description-editor')) host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<span class="a-field-required" data-a-required="descriptionA">确认时必填</span><textarea id="description-editor" aria-invalid="false" aria-describedby="a-field-descriptionA-error">${escapeHtml(descriptionARawEdit ?? descriptionA)}</textarea><span class="a-field-error" id="a-field-descriptionA-error" data-a-field-error="descriptionA" role="alert" hidden></span></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择 A 版参考图" aria-describedby="a-image-feedback"></label><p class="a-image-feedback" id="a-image-feedback" data-a-image-feedback role="status" hidden></p><div data-a-image-preview></div><div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
           host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else {
@@ -2105,7 +2115,7 @@
         if ((progress > 2 || descriptionA) && !window.confirm('恢复会新建一个 A 版草稿，并清除当前 A 版之后的提示词和生成结果。原历史记录会保留。是否继续？')) return;
         const request = beginAgentRequest('restore_a');
         const restoringModalSession = modalSession;
-        const draftSnapshot = () => JSON.stringify({ descriptionA, descriptionAStructured, descriptionADraft, descriptionAFieldEdits, currentAgentRunId, currentAgentRunVersion });
+        const draftSnapshot = () => JSON.stringify({ descriptionA, descriptionARawEdit, descriptionAStructured, descriptionADraft, descriptionAFieldEdits, currentAgentRunId, currentAgentRunVersion });
         const restoringDraft = draftSnapshot();
         const isRestoreContextCurrent = () => activeAgentRequest === request && isAgentRequestCurrent(request) && modalSession === restoringModalSession;
         const isCurrentRestore = () => isRestoreContextCurrent() && restoringDraft === draftSnapshot();
@@ -2123,6 +2133,7 @@
           currentAgentRunId = restoredRun.runId;
           currentAgentRunVersion = Number(restoredRun.version) || 0;
           latestAgentDraftVersion = Math.max(latestAgentDraftVersion, currentAgentRunVersion);
+          replaceAEditorRaw(restoredRun.output.draft.rawText || '');
           descriptionA = restoredRun.output.draft.rawText || '';
           descriptionADraft = restoredRun.output.draft;
           descriptionAStructured = restoredRun.output.descriptionAStructured || {};
@@ -2449,11 +2460,19 @@
             : String(value ?? '').trim()];
         }))
       });
+      const readAEditorRawText = () => detailContents.a.querySelector('#description-editor')?.value ?? descriptionARawEdit ?? descriptionA;
+      const replaceAEditorRaw = (value) => {
+        descriptionARawEdit = null;
+        const editor = detailContents.a.querySelector('#description-editor');
+        if (editor) editor.value = String(value ?? '');
+      };
+      const clearSavedARawEdit = (operation) => {
+        if (descriptionARawEdit === operation.rawEdit && readAEditorRawText() === operation.rawText) descriptionARawEdit = null;
+      };
       const storedAContent = () => normalizeAContent({ rawText: descriptionA, fields: descriptionADraft?.fields }, descriptionAStructured);
       const editorAContent = () => {
         const stored = storedAContent();
-        const raw = detailContents.a.querySelector('#description-editor');
-        if (raw) stored.rawText = raw.value.trim();
+        stored.rawText = readAEditorRawText().trim();
         for (const definition of agentDraftFieldDefinitions) {
           const input = detailContents.a.querySelector(`[data-agent-field="${definition.key}"]`);
           if (input) stored.fields[definition.key] = parseDraftFieldInput(definition, input.value);
@@ -2514,7 +2533,7 @@
         && sending.session === projectSession && !activeAOperation && !pendingAConfirmation && !isAConfirmationPending()
         && sending.content === JSON.stringify(editorAContent()) && sending.baseline === JSON.stringify(resolveAcceptedASnapshot());
       const captureAOperation = () => ({ projectId, routeUrl: projectApiUrl, session: projectSession, runId: currentAgentRunId,
-        inputSignature: agentInputSignature(), content: editorAContent(), collected: collectAgentDraftPatch() });
+        inputSignature: agentInputSignature(), content: editorAContent(), rawText: readAEditorRawText(), rawEdit: descriptionARawEdit, collected: collectAgentDraftPatch() });
       const isAOperationCurrent = (operation) => activeAOperation === operation && operation.projectId === projectId
         && operation.routeUrl === projectApiUrl && operation.session === projectSession && operation.runId === currentAgentRunId
         && operation.inputSignature === agentInputSignature() && JSON.stringify(operation.content) === JSON.stringify(editorAContent());
@@ -2546,7 +2565,7 @@
       const collectAgentDraftPatch = () => {
         const run = agentRunHistory.find((item) => item.runId === currentAgentRunId);
         const baseDraft = run?.output?.draft || descriptionADraft || {};
-        const nextDescription = detailContents.a.querySelector('#description-editor')?.value.trim() ?? descriptionA;
+        const nextDescription = readAEditorRawText().trim();
         const patch = {};
         if (nextDescription !== String(baseDraft.rawText || descriptionA || '').trim()) patch.rawText = nextDescription;
         const fields = {};
@@ -2627,7 +2646,9 @@
         try {
           await serverSyncQueue;
           if (!isAOperationCurrent(operation) || !await saveAgentDraftOperation(operation)) return { changed: false };
-          if (!await strictAProjectSave(operation, serializeProject())) return { changed: false };
+          if (!await strictAProjectSave(operation, { ...serializeProject(), descriptionARawEdit: null })) return { changed: false };
+          clearSavedARawEdit(operation);
+          persistState();
           if (showFeedback) showToast(operation.collected.changed ? '简报草稿已保存，请确认 A 版后继续' : '简报没有新的修改');
           return { changed: operation.collected.changed, run: operation.collected.run };
         } catch (error) {
@@ -2698,13 +2719,14 @@
           }
           operation.committing = true;
           refreshAConfirmationState();
-          if (!await strictAProjectSave(operation, confirmedAProject(operation.content, operation.clearDownstream))) return;
+          if (!await strictAProjectSave(operation, { ...confirmedAProject(operation.content, operation.clearDownstream), descriptionARawEdit: null })) return;
           if (operation.clearDownstream) {
             resetDownstream(2);
             generationResendSourceJobId = '';
           }
           acceptedASnapshot = operation.content;
           descriptionA = operation.content.rawText;
+          clearSavedARawEdit(operation);
           progress = Math.max(progress, 3);
           markStepComplete(2);
           setCurrentStep(3, '等待确认');
@@ -3309,7 +3331,7 @@
         }
       });
       workflowCanvas.addEventListener('input', (event) => {
-        if (event.target.id === 'description-editor') { clearCorrectedAFieldError('descriptionA'); refreshAConfirmationState(); return; }
+        if (event.target.id === 'description-editor') { descriptionARawEdit = event.target.value; clearCorrectedAFieldError('descriptionA'); refreshAConfirmationState(); persistState(); return; }
         const input = event.target.closest('[data-agent-field]');
         if (!input) return;
         const key = input.dataset.agentField;
@@ -3466,6 +3488,7 @@
         if (saved) {
           progress = saved.progress || (saved.generated ? 2 : 1);
           descriptionA = saved.descriptionA || '';
+          descriptionARawEdit = typeof saved.descriptionARawEdit === 'string' ? saved.descriptionARawEdit : null;
           acceptedASnapshot = Object.prototype.hasOwnProperty.call(saved, 'acceptedASnapshot')
             ? (saved.acceptedASnapshot ? normalizeAContent(saved.acceptedASnapshot) : null) : undefined;
           descriptionAStructured = saved.descriptionAStructured && typeof saved.descriptionAStructured === 'object' ? saved.descriptionAStructured : {};

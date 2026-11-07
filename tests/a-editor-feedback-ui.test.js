@@ -32,7 +32,7 @@ const setup = ({ accepted = false, legacy = false, progress = 4 } = {}) => {
     detailContents: { a: host }, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null,
     projectId: 'old', projectApiUrl: '/api/projects/old', projectSession: 0, currentAgentRunId: 'run-a',
     agentRunHistory: [{ runId: 'run-a', accepted, legacyCompatibility: { allowIncompleteSemanticMinimum: legacy }, output: { draft } }],
-    descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: fields, descriptionAFieldEdits: {}, acceptedASnapshot: { rawText: raw.value },
+    descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: fields, descriptionAFieldEdits: {}, descriptionARawEdit: null, acceptedASnapshot: { rawText: raw.value },
     aReferenceImageUrl: '/old.png', progress, promptB: '旧 B', generatedResults: [{ url: '/old-result.png' }], generationJobId: 'old-job', generationResendSourceJobId: 'resend-old',
     agentBusy: false, interrupted: false, serverSyncQueue: null, productState: { name: '珍珠' }, document: { querySelectorAll: () => [] },
     URL, window: { location: { href: 'http://localhost/' }, confirm: () => { calls.push(['confirm']); return true; } },
@@ -43,7 +43,7 @@ const setup = ({ accepted = false, legacy = false, progress = 4 } = {}) => {
     setAOperation: (operation) => { context.activeAOperation = operation; context.agentBusy = Boolean(operation); },
     isAOperationCurrent: (operation) => context.activeAOperation === operation && operation.projectId === context.projectId && operation.session === context.projectSession && operation.routeUrl === context.projectApiUrl && JSON.stringify(operation.content) === JSON.stringify(context.editorAContent()),
     strictAProjectSave: async (operation, candidate) => { const response = await context.fetch(operation.routeUrl, { method: 'PUT', body: JSON.stringify(candidate) }); if (!response.ok) throw new Error('项目未能保存'); return context.isAOperationCurrent(operation); },
-    serializeProject: () => plain({ projectId: context.projectId, descriptionA: context.descriptionA, acceptedASnapshot: context.acceptedASnapshot, aReferenceImageUrl: context.aReferenceImageUrl, promptB: context.promptB, generatedResults: context.generatedResults, generationJobId: context.generationJobId, progress: context.progress }),
+    serializeProject: () => plain({ projectId: context.projectId, descriptionA: context.descriptionA, descriptionARawEdit: context.descriptionARawEdit, acceptedASnapshot: context.acceptedASnapshot, aReferenceImageUrl: context.aReferenceImageUrl, promptB: context.promptB, generatedResults: context.generatedResults, generationJobId: context.generationJobId, progress: context.progress }),
     confirmedAProject: (content) => ({ ...context.serializeProject(), acceptedASnapshot: content, promptB: '', generatedResults: [], generationJobId: '', progress: 3 }),
     resetDownstream: () => { calls.push(['reset']); context.progress = 3; context.promptB = ''; context.generatedResults = []; context.generationJobId = ''; },
     persistState: () => calls.push(['persist']), syncProject: async () => calls.push(['sync']), openDetail: () => { calls.push(['rebuild']); raw.value = context.descriptionA; },
@@ -51,7 +51,7 @@ const setup = ({ accepted = false, legacy = false, progress = 4 } = {}) => {
     confirmDescriptionOperation: async () => calls.push(['accept']), openModal() {}, modalSession: 0,
   };
   context.fetch = async (url, options = {}) => { requests.push({ url, method: options.method, body: options.body }); return { ok: true, status: 200, json: async () => ({ url: '/uploads/old/new.png', project: {} }) }; };
-  const optional = ['requiresASemanticValidation', 'aFieldInput', 'setAFieldError', 'showAFieldErrors', 'clearCorrectedAFieldError', 'renderAFieldRequirement', 'refreshAFieldRequirements', 'refreshAImageFeedback', 'setAImageFeedback', 'refreshAImagePreview', 'isAImageUploadCurrent'];
+  const optional = ['readAEditorRawText', 'replaceAEditorRaw', 'clearSavedARawEdit', 'requiresASemanticValidation', 'aFieldInput', 'setAFieldError', 'showAFieldErrors', 'clearCorrectedAFieldError', 'renderAFieldRequirement', 'refreshAFieldRequirements', 'refreshAImageFeedback', 'setAImageFeedback', 'refreshAImagePreview', 'isAImageUploadCurrent'];
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('      const agentDraftFieldDefinitions ='), source.indexOf('      const getDraftField =')) + '\n' + [...optional.filter((name) => source.includes(`      const ${name} =`)), 'validateDescriptionAConfirmation', 'confirmDescription', 'uploadABriefImage'].map(declaration).join('\n') + '\nglobalThis.ui = { validateDescriptionAConfirmation, confirmDescription, uploadABriefImage' + optional.filter((name) => source.includes(`      const ${name} =`)).map((name) => `, ${name}`).join('') + ' };', context);
   return { context, calls, requests, raw, inputs, errors, feedback, preview, fileInput, buttons };
