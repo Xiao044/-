@@ -218,6 +218,7 @@
       let latestAgentDraftVersion = 0;
       let aReferenceImageUrl = '';
       let promptB = '';
+      let promptBEdit = null;
       let negativePrompt = '';
       let aspectRatio = '4:5';
       let platformParams = {};
@@ -353,6 +354,7 @@
             currentAgentRunVersion,
             aReferenceImageUrl,
             promptB,
+            promptBEdit,
             negativePrompt,
             aspectRatio,
             platformParams,
@@ -387,7 +389,7 @@
         const selectedOption = sceneOptions.find((option) => option.classList.contains('selected'));
         return {
           projectId, selectedScene: selectedOption?.textContent.trim() || '', interrupted, generated, progress,
-          descriptionA, descriptionARawEdit, acceptedASnapshot, promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
+          descriptionA, descriptionARawEdit, acceptedASnapshot, promptB, promptBEdit, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion, agentTemplateId, agentTemplateVersion, resultGenerated, resultSelected, product: productState, versions,
           currentAgentRunId, currentAgentRunVersion,
           promptBExecution: { positive_prompt: promptB, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, platform_params: platformParams, platform_overrides: platformOverrides, source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion },
           descriptionAStructured,
@@ -584,9 +586,9 @@
         }
       };
       const restoreProjectFromServer = async () => {
-        if (descriptionARawEdit !== null) return;
-        const routeUrl = projectApiUrl, restoringProjectId = projectId, session = projectSession, rawEdit = descriptionARawEdit;
-        const isCurrent = () => routeUrl === projectApiUrl && restoringProjectId === projectId && session === projectSession && rawEdit === descriptionARawEdit;
+        if (descriptionARawEdit !== null || promptBEdit !== null) return;
+        const routeUrl = projectApiUrl, restoringProjectId = projectId, session = projectSession, rawEdit = descriptionARawEdit, bEdit = promptBEdit;
+        const isCurrent = () => routeUrl === projectApiUrl && restoringProjectId === projectId && session === projectSession && rawEdit === descriptionARawEdit && bEdit === promptBEdit;
         try {
           const response = await fetch(routeUrl, { cache: 'no-store' });
           if (!response.ok || !isCurrent()) return;
@@ -714,7 +716,7 @@
           invalidateAgentRequest();
           pendingSceneChange = null;
           projectSession += 1;
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, descriptionARawEdit: null, projectId: activeProjectId }));
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, descriptionARawEdit: null, promptBEdit: null, projectId: activeProjectId }));
           projectId = activeProjectId;
           projectApiUrl = `/api/projects/${encodeURIComponent(activeProjectId)}`;
           const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
@@ -1445,6 +1447,7 @@
           negativePrompt = proposed.negativePrompt;
           aspectRatio = allowedAspectRatios.includes(proposed.aspectRatio) ? proposed.aspectRatio : '4:5';
           platformParams = validatePlatformParams(proposed.platformParams).value || {};
+          replaceBEditorEdits();
           platformOverrides = validatePlatformOverrides(proposed.platformOverrides).value || {};
           commitPlatformOverrides();
           promptBSource = `template:${template.templateId}@v${Math.max(1, Number(template.version) || 1)}`;
@@ -1525,10 +1528,10 @@
           if (!response.ok) throw new Error(payload.error || '版本恢复失败');
           const restoredProject = payload.project && typeof payload.project === 'object' ? payload.project : record.snapshot;
           if (!restoredProject || typeof restoredProject !== 'object') throw new Error('版本恢复未返回项目快照');
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, descriptionARawEdit: null, projectId: restoredProject.projectId || payload.projectId || projectId }));
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, descriptionARawEdit: null, promptBEdit: null, projectId: restoredProject.projectId || payload.projectId || projectId }));
         } else {
           const localSnapshot = { ...(record.snapshot || record), projectId };
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, descriptionARawEdit: null, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
+          window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, descriptionARawEdit: null, promptBEdit: null, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
         }
         window.location.reload();
       };
@@ -1564,6 +1567,7 @@
         negativePrompt = '';
         aspectRatio = '4:5';
         platformParams = {};
+        replaceBEditorEdits();
         platformOverrides = {};
         promptBSource = 'workbench';
         promptBVersion = 1;
@@ -1678,7 +1682,7 @@
           setStatus('等待回答');
         }
         if (stepIndex < 2) { acceptedASnapshot = null; descriptionA = ''; replaceAEditorRaw(''); descriptionAStructured = {}; agentWarnings = []; descriptionADraft = null; descriptionAFieldEdits = {}; agentTemplateId = ''; agentTemplateVersion = 0; refreshAgentWarningPanel(); }
-        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; promptBTemplateId = ''; promptBTemplateVersion = 0; commitPlatformOverrides(); }
+        if (stepIndex < 3) { promptB = ''; negativePrompt = ''; aspectRatio = '4:5'; platformParams = {}; replaceBEditorEdits(); platformOverrides = {}; promptBSource = 'workbench'; promptBVersion = 1; promptBTemplateId = ''; promptBTemplateVersion = 0; commitPlatformOverrides(); }
         if (stepIndex < 4) {
           resultGenerated = false;
           resultSelected = -1;
@@ -1784,7 +1788,13 @@
           // Keep the live A inputs stable while a save, confirmation or reference binding owns them.
           if (!activeAOperation || !host.querySelector('#description-editor')) host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<span class="a-field-required" data-a-required="descriptionA">确认时必填</span><textarea id="description-editor" aria-invalid="false" aria-describedby="a-field-descriptionA-error">${escapeHtml(descriptionARawEdit ?? descriptionA)}</textarea><span class="a-field-error" id="a-field-descriptionA-error" data-a-field-error="descriptionA" role="alert" hidden></span></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择 A 版参考图" aria-describedby="a-image-feedback"></label><p class="a-image-feedback" id="a-image-feedback" data-a-image-feedback role="status" hidden></p><div data-a-image-preview></div><div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
-          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(promptB)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(JSON.stringify(platformParams, null, 2))}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          const editing = promptBEdit ?? storedBEditorRaw();
+          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(editing.positivePrompt)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(editing.negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === editing.aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(editing.platformParamsText)}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          // Set DOM values after HTML parsing so an initial line feed is not stripped.
+          host.querySelector('#prompt-editor').value = editing.positivePrompt;
+          host.querySelector('#negative-prompt-editor').value = editing.negativePrompt;
+          host.querySelector('#aspect-ratio-editor').value = editing.aspectRatio;
+          host.querySelector('#platform-params-editor').value = editing.platformParamsText;
         } else {
           host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p class="generation-intro">可多选；各平台独立运行。当前四个平台均未验收，支持手动导入。</p><div class="platform-picker" data-platform-picker><button class="platform-picker-trigger" type="button" data-platform-picker-trigger aria-haspopup="listbox" aria-expanded="false"><span class="platform-picker-label"><span class="platform-picker-icon"><svg class="ui-icon"><use href="#i-sparkle"></use></svg></span><span><strong>生成平台</strong><small data-platform-picker-summary>请选择平台</small></span></span><svg class="ui-icon platform-picker-chevron"><use href="#i-arrow"></use></svg></button><div class="platform-submenu" data-platform-picker-menu role="listbox" aria-multiselectable="true" aria-hidden="true">${Object.entries(generationPlatforms).map(([key, value]) => `<label class="platform-option" role="option" aria-selected="${selectedGenerationPlatforms.has(key) ? 'true' : 'false'}"><input type="checkbox" name="generation-platform" value="${key}" ${selectedGenerationPlatforms.has(key) ? 'checked' : ''}><span class="platform-option-copy"><strong>${value.label}</strong><small>${key === 'doubao' ? '未验收' : '实验性 · 未验收'}</small></span><span class="platform-option-check"><svg class="ui-icon"><use href="#i-check"></use></svg></span></label>`).join('')}</div></div><div class="platform-overrides-editor" id="platform-overrides-editor" aria-label="平台覆盖参数"></div><div class="platform-status-list" id="platform-status-list"></div><div class="generation-bridge-status" id="generation-bridge-status">${doubaoExtensionReady ? '扩展已就绪' : '尚未检测到工作台扩展'}</div><div class="generation-bridge-actions"><button class="text-button" type="button" data-bridge-action="open-platform">打开所选平台</button><button class="text-button" type="button" data-bridge-action="copy-prompt">复制提示词 B</button><button class="text-button" type="button" data-bridge-action="copy-image">复制商品图地址</button><button class="text-button" type="button" data-bridge-action="manual-result">手动导入结果</button><button class="text-button" type="button" data-bridge-action="help">安装与手动操作说明</button><input class="result-upload-input" id="result-upload-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="选择生成结果图片"></div><div class="generation-results" id="generation-results"></div><div class="detail-actions"><span class="detail-state">平台分别运行；失败会单独提示</span><button class="text-button" type="button" data-detail-action="regenerate-results">重新发送</button><button class="button button-primary" type="button" data-detail-action="generate">向所选平台发送<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           syncPlatformPicker();
@@ -2553,7 +2563,7 @@
       const confirmedAProject = (content, clearDownstream) => {
         const next = { ...serializeProject(), acceptedASnapshot: content };
         if (clearDownstream) Object.assign(next, {
-          progress: 3, promptB: '', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
+          progress: 3, promptB: '', promptBEdit: null, negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
           promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
           promptBExecution: { positive_prompt: '', negative_prompt: '', aspect_ratio: '4:5', platform_params: {}, platform_overrides: {}, source: 'workbench', version: 1, templateId: '', templateVersion: 0 },
           resultGenerated: false, resultSelected: -1, generatedResults: [], generationJobId: '', generationResendSourceJobId: '', doubaoBridgeState: 'idle',
@@ -2765,11 +2775,37 @@
         }
         await confirmDescriptionOperation(operation);
       };
+      const normalizeBEditorEdit = (value) => {
+        if (!value || typeof value !== 'object' || !['positivePrompt', 'negativePrompt', 'aspectRatio', 'platformParamsText'].every((key) => typeof value[key] === 'string') || !allowedAspectRatios.includes(value.aspectRatio)) return null;
+        return { positivePrompt: value.positivePrompt, negativePrompt: value.negativePrompt, aspectRatio: value.aspectRatio, platformParamsText: value.platformParamsText };
+      };
+      const storedBEditorRaw = () => ({ positivePrompt: promptB, negativePrompt, aspectRatio, platformParamsText: JSON.stringify(platformParams, null, 2) });
+      const readBEditorRaw = () => {
+        const fallback = promptBEdit ?? storedBEditorRaw();
+        return Object.fromEntries(Object.entries({ positivePrompt: 'prompt-editor', negativePrompt: 'negative-prompt-editor', aspectRatio: 'aspect-ratio-editor', platformParamsText: 'platform-params-editor' })
+          .map(([key, id]) => [key, detailContents.b?.querySelector('#' + id)?.value ?? fallback[key]]));
+      };
+      const replaceBEditorEdits = () => {
+        promptBEdit = null;
+        const saved = storedBEditorRaw();
+        for (const [key, id] of Object.entries({ positivePrompt: 'prompt-editor', negativePrompt: 'negative-prompt-editor', aspectRatio: 'aspect-ratio-editor', platformParamsText: 'platform-params-editor' })) {
+          const input = detailContents.b?.querySelector('#' + id);
+          if (input) input.value = saved[key];
+        }
+      };
+      const cacheBEditorInput = (target) => {
+        const key = { 'prompt-editor': 'positivePrompt', 'negative-prompt-editor': 'negativePrompt', 'aspect-ratio-editor': 'aspectRatio', 'platform-params-editor': 'platformParamsText' }[target.id];
+        if (!key) return false;
+        promptBEdit = { ...readBEditorRaw(), [key]: target.value };
+        persistState();
+        return true;
+      };
       const readBExecutionFields = () => {
-        const positivePrompt = document.querySelector('#prompt-editor')?.value.trim() || '';
-        const nextNegativePrompt = document.querySelector('#negative-prompt-editor')?.value.trim() || '';
-        const nextAspectRatio = document.querySelector('#aspect-ratio-editor')?.value || '';
-        const params = parsePlatformParamsEditor(document.querySelector('#platform-params-editor')?.value || '');
+        const raw = readBEditorRaw();
+        const positivePrompt = raw.positivePrompt.trim();
+        const nextNegativePrompt = raw.negativePrompt.trim();
+        const nextAspectRatio = raw.aspectRatio;
+        const params = parsePlatformParamsEditor(raw.platformParamsText);
         const overrideEditor = readPlatformOverridesEditor();
         const nextPlatformOverrides = overrideEditor.errors.length ? clonePlatformOverrides(platformOverrides) : overrideEditor.platformOverrides;
         const validation = validateBExecution({ positivePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {} });
@@ -2791,6 +2827,7 @@
         negativePrompt = bFields.negativePrompt;
         aspectRatio = bFields.aspectRatio;
         platformParams = bFields.platformParams;
+        replaceBEditorEdits();
         platformOverrides = bFields.platformOverrides;
         commitPlatformOverrides();
         if (changed) clearPromptBTemplateProvenance();
@@ -2825,6 +2862,7 @@
         negativePrompt = bFields.negativePrompt;
         aspectRatio = bFields.aspectRatio;
         platformParams = bFields.platformParams;
+        replaceBEditorEdits();
         platformOverrides = bFields.platformOverrides;
         commitPlatformOverrides();
         if (changed) clearPromptBTemplateProvenance();
@@ -3180,6 +3218,7 @@
         syncProject();
       });
       workflowCanvas.addEventListener('change', (event) => {
+        if (cacheBEditorInput(event.target)) return;
         if (event.target.matches('input[name="generation-platform"]')) {
           selectedGenerationPlatforms = new Set([...detailContent.querySelectorAll('input[name="generation-platform"]:checked')].map((input) => input.value));
           syncPlatformPicker();
@@ -3331,6 +3370,7 @@
         }
       });
       workflowCanvas.addEventListener('input', (event) => {
+        if (cacheBEditorInput(event.target)) return;
         if (event.target.id === 'description-editor') { descriptionARawEdit = event.target.value; clearCorrectedAFieldError('descriptionA'); refreshAConfirmationState(); persistState(); return; }
         const input = event.target.closest('[data-agent-field]');
         if (!input) return;
@@ -3498,6 +3538,7 @@
           currentAgentRunId = saved.currentAgentRunId || '';
           currentAgentRunVersion = Number(saved.currentAgentRunVersion) || 0;
           aReferenceImageUrl = saved.aReferenceImageUrl || '';
+          promptBEdit = normalizeBEditorEdit(saved.promptBEdit);
           const savedB = saved.promptBExecution && typeof saved.promptBExecution === 'object' ? saved.promptBExecution : saved;
           promptB = saved.promptB || savedB.positive_prompt || savedB.positivePrompt || '';
           negativePrompt = saved.negativePrompt || savedB.negative_prompt || savedB.negativePrompt || '';

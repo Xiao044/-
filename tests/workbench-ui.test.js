@@ -34,7 +34,7 @@ const makeAContext = () => {
   const context = {
     detailContents: { a: aHost, c: cHost }, detailContent: cHost,
     document: { querySelector: (selector) => selector === '#description-editor' ? raw : null, querySelectorAll: () => [] },
-    descriptionARawEdit: null, acceptedASnapshot: undefined, activeAOperation: null, pendingAConfirmation: null, agentBusy: false, interrupted: false, pendingSceneChange: null,
+    promptBEdit: null, descriptionARawEdit: null, acceptedASnapshot: undefined, activeAOperation: null, pendingAConfirmation: null, agentBusy: false, interrupted: false, pendingSceneChange: null,
     projectId: 'test', projectSession: 0, modalSession: 0, serverSyncQueue: null, pendingProjectSync: null, invalidatedGenerationJobs: new Set(),
     promptB: '', generationJobId: '', generatedResults: [], resultGenerated: false,
     descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: {}, descriptionAFieldEdits: {},
@@ -68,7 +68,7 @@ const makeProductContext = () => {
   }]));
   const errors = Object.fromEntries(['name', 'subtitle', 'description'].map((key) => [`#product-${key}-error`, { textContent: '', hidden: true }]));
   const context = {
-    descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
+    promptBEdit: null, descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, productState: plain(product), progress: 4, generated: true, interrupted: false, agentFailure: null,
     descriptionA: '已有 A', promptB: '已有 B', negativePrompt: '', aspectRatio: '4:5', platformParams: {}, platformOverrides: {},
     promptBSource: 'workbench', promptBVersion: 1, promptBTemplateId: '', promptBTemplateVersion: 0,
     agentTemplateId: '', agentTemplateVersion: 0, descriptionAStructured: {}, agentWarnings: [], descriptionADraft: null,
@@ -360,7 +360,7 @@ test('A reference image change bubbles to its handler and C uploads and selectio
   const c = new EventNode(canvas);
   const calls = [];
   c.querySelectorAll = () => [{ value: 'doubao' }, { value: 'chatgpt' }];
-  const context = { workflowCanvas: canvas, detailContent: c, detailContents: { a, c }, uploadABriefImage: (file) => calls.push(['a', file]), uploadGeneratedResults: (files) => calls.push(['c', files]), syncPlatformPicker() {}, renderPlatformOverridesEditor() {}, renderPlatformStatuses() {}, persistState() {}, selectedGenerationPlatforms: new Set() };
+  const context = { cacheBEditorInput: () => false, workflowCanvas: canvas, detailContent: c, detailContents: { a, c }, uploadABriefImage: (file) => calls.push(['a', file]), uploadGeneratedResults: (files) => calls.push(['c', files]), syncPlatformPicker() {}, renderPlatformOverridesEditor() {}, renderPlatformStatuses() {}, persistState() {}, selectedGenerationPlatforms: new Set() };
   const registration = source.match(/^      (?:detailContent|workflowCanvas)\.addEventListener\('change', \(event\) => \{[\s\S]*?^      \}\);/m);
   assert.ok(registration, 'missing workflow change delegation');
   vm.runInNewContext(registration[0], context);

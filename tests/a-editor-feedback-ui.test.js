@@ -29,7 +29,7 @@ const setup = ({ accepted = false, legacy = false, progress = 4 } = {}) => {
   }, querySelectorAll() { return []; } };
   const draft = { rawText: raw.value, fields: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, { value: key === 'mustKeep' ? [value] : value }])) };
   const context = {
-    detailContents: { a: host }, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null,
+    cacheBEditorInput: () => false, detailContents: { a: host }, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null,
     projectId: 'old', projectApiUrl: '/api/projects/old', projectSession: 0, currentAgentRunId: 'run-a',
     agentRunHistory: [{ runId: 'run-a', accepted, legacyCompatibility: { allowIncompleteSemanticMinimum: legacy }, output: { draft } }],
     descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: fields, descriptionAFieldEdits: {}, descriptionARawEdit: null, acceptedASnapshot: { rawText: raw.value },
@@ -126,7 +126,7 @@ test('real field input delegation clears the corrected error and retains other e
   assert.equal(s.errors.scene.hidden, true); assert.equal(s.context.descriptionAFieldEdits.scene, '新场景');
 });
 test('real file change delegation clears its value so the same file can be selected again', () => {
-  let listener, uploads = 0; const context = { workflowCanvas: { addEventListener: (type, handler) => { listener = handler; } }, uploadABriefImage: () => { uploads++; } };
+  let listener, uploads = 0; const context = { cacheBEditorInput: () => false, workflowCanvas: { addEventListener: (type, handler) => { listener = handler; } }, uploadABriefImage: () => { uploads++; } };
   const registration = source.match(/^      workflowCanvas\.addEventListener\('change', \(event\) => \{[\s\S]*?^      \}\);/m); vm.runInNewContext(registration[0], context);
   const target = { id: 'a-reference-image', value: 'C:\\fakepath\\same.png', files: [file], matches: () => false };
   listener({ target }); assert.equal(target.value, ''); listener({ target }); assert.equal(uploads, 2);

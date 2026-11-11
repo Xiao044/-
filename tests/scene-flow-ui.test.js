@@ -44,7 +44,7 @@ const makeContext = ({ downstream = false } = {}) => {
   const storage = new Map(), requests = [], calls = [];
   const nodes = { '.reply-box button': replyButton, '.reply-box textarea': replyInput, '.agent-greeting strong': greeting, '.agent-greeting p': question, '.modal-close': closeButton, '.step-track': stepTrack, '[data-agent-failure]': failure, '[data-agent-failure-title]': failureTitle, '[data-agent-failure-message]': failureMessage, '[data-agent-retry]': retryButton };
   const context = {
-    descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null, refreshAImageFeedback() {},
+    promptBEdit: null, descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null, refreshAImageFeedback() {},
     detailContents: { a: { querySelector: () => null } },
     resolveAcceptedASnapshot() {}, refreshAConfirmationState() {},
     projectId: 'demo', projectApiUrl: '/api/projects/demo', projectSession: 0,
@@ -79,7 +79,7 @@ const makeContext = ({ downstream = false } = {}) => {
     }
   };
   vm.createContext(context);
-  const helpers = ['readAEditorRawText', 'replaceAEditorRaw', 'clearSavedARawEdit', 'selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent', 'beginAgentRequest', 'finishAgentRequest', 'invalidateAgentRequest', 'hasSceneDownstream', 'applySceneSelection', 'selectScene', 'confirmSceneChange', 'agentRequestError', 'agentFailureMessage', 'clearAgentFailure', 'isAgentFailureCurrent', 'renderAgentFailure', 'showAgentFailure', 'retryAgentRequest', 'generateDescriptionA', 'submitAgentNote'];
+  const helpers = ['normalizeBEditorEdit', 'storedBEditorRaw', 'readBEditorRaw', 'replaceBEditorEdits', 'cacheBEditorInput', 'readAEditorRawText', 'replaceAEditorRaw', 'clearSavedARawEdit', 'selectedSceneName', 'agentInputSignature', 'captureAgentRequest', 'isAgentRequestCurrent', 'beginAgentRequest', 'finishAgentRequest', 'invalidateAgentRequest', 'hasSceneDownstream', 'applySceneSelection', 'selectScene', 'confirmSceneChange', 'agentRequestError', 'agentFailureMessage', 'clearAgentFailure', 'isAgentFailureCurrent', 'renderAgentFailure', 'showAgentFailure', 'retryAgentRequest', 'generateDescriptionA', 'submitAgentNote'];
   const presentHelpers = helpers.filter((name) => source.includes(`      const ${name} =`));
   vm.runInContext([
     ...['persistedResults', 'persistState', 'serializeProject', 'syncProject', 'ensureProjectOnServer', 'restoreAgentRunsFromServer', 'restoreAgentRun', 'requestAgent', 'setAgentBusy', 'openModal', 'closeModal', 'resetDownstream', ...presentHelpers].map(declaration),

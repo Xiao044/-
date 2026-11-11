@@ -719,7 +719,7 @@ test('frontend guards A and B semantic minimums and orders A image reset after u
   assert.match(source, /platformParams: payload\.job\.platforms\?\.\[platform\]\?\.platformParams/);
   assert.match(source, /platformOverrides,?\s*promptBSource/);
   assert.match(source, /platform_overrides: platformOverrides/);
-  assert.match(source, /platformParams = \{\}; platformOverrides = \{\};/);
+  assert.match(source, /platformParams = \{\}; replaceBEditorEdits\(\); platformOverrides = \{\};/);
   assert.match(source, /selectedGenerationPlatforms = new Set\([\s\S]{0,220}renderPlatformOverridesEditor\(\)/);
   assert.match(source, /detailContent.addEventListener\('input',[\s\S]{0,450}platformOverrides = validation.value/);
   assert.match(source, /validateBExecution/);
