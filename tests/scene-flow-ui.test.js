@@ -44,9 +44,9 @@ const makeContext = ({ downstream = false } = {}) => {
   const storage = new Map(), requests = [], calls = [];
   const nodes = { '.reply-box button': replyButton, '.reply-box textarea': replyInput, '.agent-greeting strong': greeting, '.agent-greeting p': question, '.modal-close': closeButton, '.step-track': stepTrack, '[data-agent-failure]': failure, '[data-agent-failure-title]': failureTitle, '[data-agent-failure-message]': failureMessage, '[data-agent-retry]': retryButton };
   const context = {
-    promptBEdit: null, descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null, refreshAImageFeedback() {},
+    promptBEdit: null, descriptionARawEdit: null, acceptedASnapshot: null, activeAOperation: null, activeBOperation: null, bConfirmationSequence: 0, projectWriteCount: 0, pendingAConfirmation: null, aImageFeedback: null, refreshAImageFeedback() {},
     detailContents: { a: { querySelector: () => null } },
-    resolveAcceptedASnapshot() {}, refreshAConfirmationState() {},
+    resolveAcceptedASnapshot() {}, refreshAConfirmationState() {}, refreshBConfirmationState() {}, editorAContent() { return { rawText: context.descriptionA }; }, isAConfirmationPending: () => false,
     projectId: 'demo', projectApiUrl: '/api/projects/demo', projectSession: 0,
     pendingImportedProjectReload: false, pendingSceneChange: null, modalSession: 0,
     agentRequestSequence: 0, activeAgentRequest: null, agentBusy: false, agentFailure: null,
@@ -64,7 +64,7 @@ const makeContext = ({ downstream = false } = {}) => {
     nextButton: next, interruptButton: element(), currentStep: element(), currentStepLabel: element(), modal, modalTitle, modalBody, closeButton,
     flowSteps: [element(), element(), element(), element(), element()], workflowNodes: [], stepNodes: {},
     storageKey: 'scene-test', projectName: '测试项目', serverUpdatedAt: '', pendingProjectSync: null, serverSyncQueue: null,
-    document: { querySelector: (selector) => nodes[selector] || null },
+    document: { querySelector: (selector) => nodes[selector] || null, querySelectorAll: () => [] },
     window: { localStorage: { setItem: (key, value) => storage.set(key, value), getItem: (key) => storage.get(key) ?? null }, confirm: () => true, matchMedia: () => ({ matches: true }) },
     CSS: { escape: (value) => value },
     escapeHtml: (value) => String(value ?? '').replace(/[&<>"']/g, ''),

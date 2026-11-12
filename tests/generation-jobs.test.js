@@ -723,7 +723,7 @@ test('frontend guards A and B semantic minimums and orders A image reset after u
   assert.match(source, /selectedGenerationPlatforms = new Set\([\s\S]{0,220}renderPlatformOverridesEditor\(\)/);
   assert.match(source, /detailContent.addEventListener\('input',[\s\S]{0,450}platformOverrides = validation.value/);
   assert.match(source, /validateBExecution/);
-  assert.match(source, /JSON.stringify\(bFields\.platformParams\)/);
+  assert.match(source, /JSON.stringify\(fields\.platformParams\)/);
   const createProjectStart = source.indexOf('const createProject = async');
   const createProjectEnd = source.indexOf('const defaultDescription', createProjectStart);
   const createProjectBlock = source.slice(createProjectStart, createProjectEnd);

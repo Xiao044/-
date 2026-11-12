@@ -29,7 +29,7 @@ const setup = ({ accepted = false, legacy = false, progress = 4 } = {}) => {
   }, querySelectorAll() { return []; } };
   const draft = { rawText: raw.value, fields: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, { value: key === 'mustKeep' ? [value] : value }])) };
   const context = {
-    cacheBEditorInput: () => false, detailContents: { a: host }, activeAOperation: null, pendingAConfirmation: null, aImageFeedback: null,
+    cacheBEditorInput: () => false, detailContents: { a: host }, activeAOperation: null, activeBOperation: null, projectWriteCount: 0, pendingAConfirmation: null, aImageFeedback: null,
     projectId: 'old', projectApiUrl: '/api/projects/old', projectSession: 0, currentAgentRunId: 'run-a',
     agentRunHistory: [{ runId: 'run-a', accepted, legacyCompatibility: { allowIncompleteSemanticMinimum: legacy }, output: { draft } }],
     descriptionA: raw.value, descriptionADraft: draft, descriptionAStructured: fields, descriptionAFieldEdits: {}, descriptionARawEdit: null, acceptedASnapshot: { rawText: raw.value },
@@ -47,7 +47,7 @@ const setup = ({ accepted = false, legacy = false, progress = 4 } = {}) => {
     confirmedAProject: (content) => ({ ...context.serializeProject(), acceptedASnapshot: content, promptB: '', generatedResults: [], generationJobId: '', progress: 3 }),
     resetDownstream: () => { calls.push(['reset']); context.progress = 3; context.promptB = ''; context.generatedResults = []; context.generationJobId = ''; },
     persistState: () => calls.push(['persist']), syncProject: async () => calls.push(['sync']), openDetail: () => { calls.push(['rebuild']); raw.value = context.descriptionA; },
-    showToast: (message) => calls.push(['toast', message]), refreshAConfirmationState() {}, hasADownstream: () => false, isAConfirmationPending: () => false,
+    showToast: (message) => calls.push(['toast', message]), refreshAConfirmationState() {}, refreshBConfirmationState() {}, hasADownstream: () => false, isAConfirmationPending: () => false,
     confirmDescriptionOperation: async () => calls.push(['accept']), openModal() {}, modalSession: 0,
   };
   context.fetch = async (url, options = {}) => { requests.push({ url, method: options.method, body: options.body }); return { ok: true, status: 200, json: async () => ({ url: '/uploads/old/new.png', project: {} }) }; };
@@ -126,7 +126,7 @@ test('real field input delegation clears the corrected error and retains other e
   assert.equal(s.errors.scene.hidden, true); assert.equal(s.context.descriptionAFieldEdits.scene, '新场景');
 });
 test('real file change delegation clears its value so the same file can be selected again', () => {
-  let listener, uploads = 0; const context = { cacheBEditorInput: () => false, workflowCanvas: { addEventListener: (type, handler) => { listener = handler; } }, uploadABriefImage: () => { uploads++; } };
+  let listener, uploads = 0; const context = { activeBOperation: null, projectWriteCount: 0, cacheBEditorInput: () => false, workflowCanvas: { addEventListener: (type, handler) => { listener = handler; } }, uploadABriefImage: () => { uploads++; } };
   const registration = source.match(/^      workflowCanvas\.addEventListener\('change', \(event\) => \{[\s\S]*?^      \}\);/m); vm.runInNewContext(registration[0], context);
   const target = { id: 'a-reference-image', value: 'C:\\fakepath\\same.png', files: [file], matches: () => false };
   listener({ target }); assert.equal(target.value, ''); listener({ target }); assert.equal(uploads, 2);

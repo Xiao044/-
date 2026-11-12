@@ -57,7 +57,7 @@ test('prompt template project tool exposes escaped cards, CRUD actions, and A/B 
   assert.match(indexSource, /JSON\.stringify\(proposed\.platformOverrides\) !== JSON\.stringify\(platformOverrides\)/);
   assert.match(indexSource, /const readBExecutionFields = \(\) =>/);
   assert.match(indexSource, /platformOverrides: nextPlatformOverrides/);
-  assert.match(indexSource, /JSON\.stringify\(bFields\.platformOverrides\) !== JSON\.stringify\(bPlatformOverridesBaseline\(\)\)/);
+  assert.match(indexSource, /JSON\.stringify\(fields\.platformOverrides\) !== JSON\.stringify\(bPlatformOverridesBaseline\(\)\)/);
   assert.match(indexSource, /const clearPromptBTemplateProvenance = \(\) =>/);
   assert.match(indexSource, /if \(platformOverridesDirty\) clearPromptBTemplateProvenance\(\)/);
   assert.match(indexSource, /平台覆盖参数已修改。当前生成结果将失效/);

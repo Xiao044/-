@@ -205,6 +205,9 @@
       let descriptionARawEdit = null;
       let acceptedASnapshot;
       let activeAOperation = null;
+      let activeBOperation = null;
+      let bConfirmationSequence = 0;
+      let projectWriteCount = 0;
       let pendingAConfirmation = null;
       let aImageFeedback = null;
       let descriptionAStructured = {};
@@ -410,8 +413,8 @@
         };
       };
       const syncProject = (showFeedback = false) => {
-        if (activeAOperation) {
-          if (showFeedback) showToast('A 版正在保存或确认，请完成后再保存项目');
+        if (activeAOperation || activeBOperation) {
+          if (showFeedback) showToast(activeBOperation ? 'B 版正在保存，请完成后再保存项目' : 'A 版正在保存或确认，请完成后再保存项目');
           return Promise.resolve(false);
         }
         const nextRequest = { routeUrl: projectApiUrl, body: JSON.stringify(serializeProject()), showFeedback: Boolean(showFeedback) };
@@ -459,7 +462,7 @@
           if (!response.ok) return;
           const payload = await response.json();
           if (projectApiUrl !== routeUrl || projectSession !== session || projectId !== restoringProjectId
-            || activeAOperation !== restoringAOperation || activeAOperation || JSON.stringify(descriptionAFieldEdits) !== restoringAEdits || descriptionARawEdit !== restoringRawEdit
+            || activeAOperation !== restoringAOperation || activeAOperation || activeBOperation || JSON.stringify(descriptionAFieldEdits) !== restoringAEdits || descriptionARawEdit !== restoringRawEdit
             || agentInputSignature() !== inputSignature || currentAgentRunId !== restoringRunId || descriptionA !== restoringText) return;
           agentRunHistory = Array.isArray(payload.runs) ? payload.runs : [];
           resolveAcceptedASnapshot();
@@ -482,34 +485,37 @@
         } catch (error) { /* Existing project state remains usable offline. */ }
       };
       const uploadProductImage = async (file) => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
-        if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
-        if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
-        const shouldResetDownstream = progress > 1;
-        if (shouldResetDownstream) {
-          const accepted = window.confirm('更换商品图片会影响后续创作内容。Agent 回答、描述词、提示词和生成结果需要重做。是否清除下游进度并继续？');
-          if (!accepted) return;
-        }
-        const images = document.querySelectorAll('.product-visual img, .inspector-asset img');
-        const previewUrl = URL.createObjectURL(file);
-        images.forEach((image) => {
-          image.src = previewUrl;
-          image.alt = `${productState.name}商品图片`;
-        });
-        showToast('正在上传商品图片');
+        if (activeAOperation || activeBOperation) { showToast(activeBOperation ? 'B 版正在保存，请完成后再修改' : 'A 版正在保存或确认，请完成后再修改'); return; }
+        projectWriteCount += 1;
         try {
-          const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(payload.error || '图片上传失败');
-          if (shouldResetDownstream) resetDownstream(0);
-          productState.imageUrl = payload.url;
-          renderProduct();
-          persistState();
-          await syncProject();
-          showToast('商品图片已上传并保存');
-        } catch (error) {
-          showToast(error.message || '图片上传失败，已保留本地预览');
-        } finally { URL.revokeObjectURL(previewUrl); }
+          if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { showToast('请选择 PNG、JPEG 或 WebP 图片'); return; }
+          if (file.size > 8 * 1024 * 1024) { showToast('图片不能超过 8MB'); return; }
+          const shouldResetDownstream = progress > 1;
+          if (shouldResetDownstream) {
+            const accepted = window.confirm('更换商品图片会影响后续创作内容。Agent 回答、描述词、提示词和生成结果需要重做。是否清除下游进度并继续？');
+            if (!accepted) return;
+          }
+          const images = document.querySelectorAll('.product-visual img, .inspector-asset img');
+          const previewUrl = URL.createObjectURL(file);
+          images.forEach((image) => {
+            image.src = previewUrl;
+            image.alt = `${productState.name}商品图片`;
+          });
+          showToast('正在上传商品图片');
+          try {
+            const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || '图片上传失败');
+            if (shouldResetDownstream) resetDownstream(0);
+            productState.imageUrl = payload.url;
+            renderProduct();
+            persistState();
+            await syncProject();
+            showToast('商品图片已上传并保存');
+          } catch (error) {
+            showToast(error.message || '图片上传失败，已保留本地预览');
+          } finally { URL.revokeObjectURL(previewUrl); }
+        } finally { projectWriteCount -= 1; }
       };
       const refreshAImageFeedback = () => {
         const host = detailContents.a.querySelector('[data-a-image-feedback]');
@@ -535,7 +541,7 @@
         && operation.inputSignature === agentInputSignature() && operation.originalImageUrl === aReferenceImageUrl;
       const uploadABriefImage = async (file) => {
         if (!file) return;
-        if (activeAOperation || pendingAConfirmation || agentBusy || interrupted) { showToast('请等待当前操作完成后再上传参考图'); return; }
+        if (activeAOperation || activeBOperation || pendingAConfirmation || agentBusy || interrupted) { showToast('请等待当前操作完成后再上传参考图'); return; }
         if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { setAImageFeedback('error', '请选择 PNG、JPEG 或 WebP 图片，A 版文字可继续保存'); return; }
         if (file.size > 8 * 1024 * 1024) { setAImageFeedback('error', '参考图不能超过 8MB，A 版文字可继续保存'); return; }
         const clearDownstream = progress > 2;
@@ -586,9 +592,9 @@
         }
       };
       const restoreProjectFromServer = async () => {
-        if (descriptionARawEdit !== null || promptBEdit !== null) return;
+        if (activeBOperation || descriptionARawEdit !== null || promptBEdit !== null) return;
         const routeUrl = projectApiUrl, restoringProjectId = projectId, session = projectSession, rawEdit = descriptionARawEdit, bEdit = promptBEdit;
-        const isCurrent = () => routeUrl === projectApiUrl && restoringProjectId === projectId && session === projectSession && rawEdit === descriptionARawEdit && bEdit === promptBEdit;
+        const isCurrent = () => !activeBOperation && routeUrl === projectApiUrl && restoringProjectId === projectId && session === projectSession && rawEdit === descriptionARawEdit && bEdit === promptBEdit;
         try {
           const response = await fetch(routeUrl, { cache: 'no-store' });
           if (!response.ok || !isCurrent()) return;
@@ -681,71 +687,81 @@
         window.location.reload();
       };
       const importProjectFromFile = async (file) => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
-        if (!file) return;
-        const activeProjectId = projectId;
-        const importRouteUrl = projectApiUrl;
-        const importSession = projectSession;
-        const importRequestId = ++latestProjectImportRequestId;
-        const isCurrentProjectImport = () => projectId === activeProjectId
-          && projectApiUrl === importRouteUrl
-          && projectSession === importSession
-          && latestProjectImportRequestId === importRequestId;
+        if (activeAOperation || activeBOperation) { showToast(activeBOperation ? 'B 版正在保存，请完成后再修改' : 'A 版正在保存或确认，请完成后再修改'); return; }
+        projectWriteCount += 1;
         try {
-          const imported = JSON.parse(await file.text());
-          if (!isCurrentProjectImport()) return;
-          if (!imported || typeof imported !== 'object' || Array.isArray(imported)) throw new Error('项目文件必须是 JSON 对象');
-          const importedProject = Array.isArray(imported.project) ? imported.project[0] : imported.project;
-          if (!importedProject || typeof importedProject !== 'object' || importedProject.projectId !== activeProjectId) {
-            throw new Error('项目文件与当前项目不匹配');
+          if (!file) return;
+          const activeProjectId = projectId;
+          const importRouteUrl = projectApiUrl;
+          const importSession = projectSession;
+          const importRequestId = ++latestProjectImportRequestId;
+          const isCurrentProjectImport = () => projectId === activeProjectId
+            && projectApiUrl === importRouteUrl
+            && projectSession === importSession
+            && latestProjectImportRequestId === importRequestId;
+          try {
+            const imported = JSON.parse(await file.text());
+            if (!isCurrentProjectImport()) return;
+            if (!imported || typeof imported !== 'object' || Array.isArray(imported)) throw new Error('项目文件必须是 JSON 对象');
+            const importedProject = Array.isArray(imported.project) ? imported.project[0] : imported.project;
+            if (!importedProject || typeof importedProject !== 'object' || importedProject.projectId !== activeProjectId) {
+              throw new Error('项目文件与当前项目不匹配');
+            }
+            const accepted = window.confirm('导入会替换当前项目的资料、版本、任务和结果资产元数据。确认以 replace 模式继续吗？');
+            if (!accepted) return;
+            if (!isCurrentProjectImport()) return;
+            showToast('正在导入项目');
+            const response = await fetch(`${importRouteUrl}/import`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ ...imported, projectId: activeProjectId, mode: 'replace' })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!isCurrentProjectImport()) return;
+            if (!response.ok) throw new Error(payload.error || '项目导入失败');
+            const importedState = payload.project && typeof payload.project === 'object' ? payload.project : importedProject;
+            if (importedState.projectId !== activeProjectId) throw new Error('导入结果的项目 ID 与当前项目不匹配');
+            invalidateAgentRequest();
+            pendingSceneChange = null;
+            projectSession += 1;
+            window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, descriptionARawEdit: null, promptBEdit: null, projectId: activeProjectId }));
+            projectId = activeProjectId;
+            projectApiUrl = `/api/projects/${encodeURIComponent(activeProjectId)}`;
+            const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+            if (warnings.length) {
+              pendingImportedProjectReload = true;
+              const warningItems = warnings.map((warning) => {
+                const missingUpload = ['UPLOAD_MISSING', 'UPLOAD_MANIFEST_MISSING'].includes(warning.code);
+                const message = missingUpload ? `上传文件${warning.path ? ` ${warning.path}` : ''}需要检查：${warning.message || '服务器上未找到引用的文件'}` : (warning.message || warning.path || '项目导入存在需要检查的内容');
+                return `<li><strong>${escapeHtml(warning.code || 'IMPORT_WARNING')}</strong><span>${escapeHtml(message)}</span></li>`;
+              }).join('');
+              openModal('项目导入完成', `<p class="modal-note">项目数据已替换。以下上传文件需要在当前服务器上重新补齐或检查。</p><ul class="project-import-warnings">${warningItems}</ul><div class="modal-actions"><button class="button button-primary" type="button" data-modal-action="reload-imported-project">继续打开项目</button></div>`);
+            } else {
+              showToast('项目已导入');
+              window.location.reload();
+            }
+          } catch (error) {
+            if (isCurrentProjectImport()) showToast(error.message || '项目导入失败');
+          } finally {
+            if (isCurrentProjectImport() && projectImportInput) projectImportInput.value = '';
           }
-          const accepted = window.confirm('导入会替换当前项目的资料、版本、任务和结果资产元数据。确认以 replace 模式继续吗？');
-          if (!accepted) return;
-          if (!isCurrentProjectImport()) return;
-          showToast('正在导入项目');
-          const response = await fetch(`${importRouteUrl}/import`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ ...imported, projectId: activeProjectId, mode: 'replace' })
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!isCurrentProjectImport()) return;
-          if (!response.ok) throw new Error(payload.error || '项目导入失败');
-          const importedState = payload.project && typeof payload.project === 'object' ? payload.project : importedProject;
-          if (importedState.projectId !== activeProjectId) throw new Error('导入结果的项目 ID 与当前项目不匹配');
-          invalidateAgentRequest();
-          pendingSceneChange = null;
-          projectSession += 1;
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...importedState, descriptionARawEdit: null, promptBEdit: null, projectId: activeProjectId }));
-          projectId = activeProjectId;
-          projectApiUrl = `/api/projects/${encodeURIComponent(activeProjectId)}`;
-          const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
-          if (warnings.length) {
-            pendingImportedProjectReload = true;
-            const warningItems = warnings.map((warning) => {
-              const missingUpload = ['UPLOAD_MISSING', 'UPLOAD_MANIFEST_MISSING'].includes(warning.code);
-              const message = missingUpload ? `上传文件${warning.path ? ` ${warning.path}` : ''}需要检查：${warning.message || '服务器上未找到引用的文件'}` : (warning.message || warning.path || '项目导入存在需要检查的内容');
-              return `<li><strong>${escapeHtml(warning.code || 'IMPORT_WARNING')}</strong><span>${escapeHtml(message)}</span></li>`;
-            }).join('');
-            openModal('项目导入完成', `<p class="modal-note">项目数据已替换。以下上传文件需要在当前服务器上重新补齐或检查。</p><ul class="project-import-warnings">${warningItems}</ul><div class="modal-actions"><button class="button button-primary" type="button" data-modal-action="reload-imported-project">继续打开项目</button></div>`);
-          } else {
-            showToast('项目已导入');
-            window.location.reload();
-          }
-        } catch (error) {
-          if (isCurrentProjectImport()) showToast(error.message || '项目导入失败');
-        } finally {
-          if (isCurrentProjectImport() && projectImportInput) projectImportInput.value = '';
-        }
+        } finally { projectWriteCount -= 1; }
       };
       const restoreGenerationJobFromServer = async () => {
-        if (!generationJobId) return;
+        if (!generationJobId || activeBOperation || invalidatedGenerationJobs.has(generationJobId)) return;
+        const restoring = { projectId, routeUrl: projectApiUrl, session: projectSession, jobId: generationJobId, invalidatedJobs: invalidatedGenerationJobs };
+        const isCurrent = () => projectId === restoring.projectId && projectApiUrl === restoring.routeUrl && projectSession === restoring.session
+          && generationJobId === restoring.jobId && invalidatedGenerationJobs === restoring.invalidatedJobs
+          && !invalidatedGenerationJobs.has(restoring.jobId) && !activeBOperation;
+        projectWriteCount += 1;
         try {
-          const response = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}`, { cache: 'no-store' });
-          if (!response.ok) return;
+          const response = await fetch(`${restoring.routeUrl}/generation-jobs/${encodeURIComponent(restoring.jobId)}`, { cache: 'no-store' });
+          if (!isCurrent() || !response.ok) return;
           const payload = await response.json();
+          if (!isCurrent()) return;
           if (payload.job) hydrateGenerationJob(payload.job);
         } catch (error) { /* local project state remains available when the task service is offline */ }
+        finally { projectWriteCount -= 1; }
       };
 
       const showToast = (message) => {
@@ -975,7 +991,7 @@
       };
 
       const setAgentBusy = (busy) => {
-        busy = Boolean(busy || activeAgentRequest || activeAOperation);
+        busy = Boolean(busy || activeAgentRequest || activeAOperation || activeBOperation);
         agentBusy = busy;
         sceneOptions.forEach((option) => { option.disabled = busy; });
         const replyButton = document.querySelector('.reply-box button');
@@ -986,7 +1002,7 @@
         nextButton.disabled = busy || interrupted;
         nextButton.classList.toggle('is-loading', busy);
         nextButton.innerHTML = busy
-          ? `${activeAgentRequest?.task === 'restore_a' ? '正在恢复 A 版' : 'DeepSeek 整理中'}<span class="button-spinner" aria-hidden="true"></span>`
+          ? `${activeBOperation ? '正在保存 B 版' : activeAgentRequest?.task === 'restore_a' ? '正在恢复 A 版' : 'DeepSeek 整理中'}<span class="button-spinner" aria-hidden="true"></span>`
           : (generated && !editingAgent ? '描述词 A 已生成<svg class="ui-icon"><use href="#i-check"></use></svg>' : `${generated ? '重新生成' : '生成'}描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg>`);
         renderAgentFailure();
       };
@@ -1251,7 +1267,7 @@
         openModal('编辑商品资料', `${fields}<div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="save-product">保存资料</button></div>`);
       };
       const saveProduct = () => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
+        if (activeAOperation || activeBOperation) { showToast(activeBOperation ? 'B 版正在保存，请完成后再修改' : 'A 版正在保存或确认，请完成后再修改'); return; }
         const values = readProductEditor();
         if (!values) return;
         const nextProduct = {
@@ -1281,7 +1297,7 @@
         return snapshot;
       };
       const saveVersion = async () => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
+        if (activeAOperation || activeBOperation) { showToast(activeBOperation ? 'B 版正在保存，请完成后再修改' : 'A 版正在保存或确认，请完成后再修改'); return; }
         const snapshot = versionSnapshot();
         try {
           const response = await fetch(`${projectApiUrl}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ snapshot }) });
@@ -1430,7 +1446,7 @@
         openModal('应用提示词模板', templateApplyPreviewMarkup(template), { wide: true });
       };
       const applyPromptTemplate = async () => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
+        if (activeAOperation || activeBOperation) { showToast(activeBOperation ? 'B 版正在保存，请完成后再修改' : 'A 版正在保存或确认，请完成后再修改'); return; }
         const template = templateApplyCandidate;
         if (!template) return;
         const proposed = templateApplyFields(template);
@@ -1520,25 +1536,29 @@
         } catch (error) { showToast(error.message || '模板操作失败'); }
       };
       const restoreVersion = async (record) => {
-        if (activeAOperation) { showToast('A 版正在保存或确认，请完成后再修改'); return; }
-        if (!record) return;
-        if (record.versionId && !record.versionId.startsWith('local-')) {
-          const response = await fetch(`${projectApiUrl}/versions/${encodeURIComponent(record.versionId)}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(payload.error || '版本恢复失败');
-          const restoredProject = payload.project && typeof payload.project === 'object' ? payload.project : record.snapshot;
-          if (!restoredProject || typeof restoredProject !== 'object') throw new Error('版本恢复未返回项目快照');
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, descriptionARawEdit: null, promptBEdit: null, projectId: restoredProject.projectId || payload.projectId || projectId }));
-        } else {
-          const localSnapshot = { ...(record.snapshot || record), projectId };
-          window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, descriptionARawEdit: null, promptBEdit: null, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
-        }
-        window.location.reload();
+        if (activeAOperation || activeBOperation) { showToast(activeBOperation ? 'B 版正在保存，请完成后再修改' : 'A 版正在保存或确认，请完成后再修改'); return; }
+        projectWriteCount += 1;
+        try {
+          if (!record) return;
+          if (record.versionId && !record.versionId.startsWith('local-')) {
+            const response = await fetch(`${projectApiUrl}/versions/${encodeURIComponent(record.versionId)}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || '版本恢复失败');
+            const restoredProject = payload.project && typeof payload.project === 'object' ? payload.project : record.snapshot;
+            if (!restoredProject || typeof restoredProject !== 'object') throw new Error('版本恢复未返回项目快照');
+            window.localStorage.setItem(storageKey, JSON.stringify({ ...restoredProject, descriptionARawEdit: null, promptBEdit: null, projectId: restoredProject.projectId || payload.projectId || projectId }));
+          } else {
+            const localSnapshot = { ...(record.snapshot || record), projectId };
+            window.localStorage.setItem(storageKey, JSON.stringify({ ...localSnapshot, descriptionARawEdit: null, promptBEdit: null, generated: localSnapshot.progress >= 2, interrupted: false, updatedAt: new Date().toISOString() }));
+          }
+          window.location.reload();
+        } finally { projectWriteCount -= 1; }
       };
       const openNewProject = () => {
         openModal('新建项目', '<p class="modal-note">新项目会从空白的商品资料和第一步场景开始。</p><label class="modal-field">项目名称<input id="new-project-name" placeholder="例如：夏日新品系列"></label><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">取消</button><button class="button button-primary" type="button" data-modal-action="create-project">创建项目</button></div>');
       };
       const createProject = async () => {
+        if (activeBOperation) { showToast('B 版正在保存，请完成后再新建项目'); return; }
         invalidateAgentRequest();
         pendingSceneChange = null;
         acceptedASnapshot = null;
@@ -1789,7 +1809,7 @@
           if (!activeAOperation || !host.querySelector('#description-editor')) host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p>参考图仅用于后续生图，不发送给文字 Agent。</p><div data-agent-fact-warnings>${renderAgentWarnings()}</div>${renderAgentDraftFields()}<label for="description-editor">描述词 A<span class="a-field-required" data-a-required="descriptionA">确认时必填</span><textarea id="description-editor" aria-invalid="false" aria-describedby="a-field-descriptionA-error">${escapeHtml(descriptionARawEdit ?? descriptionA)}</textarea><span class="a-field-error" id="a-field-descriptionA-error" data-a-field-error="descriptionA" role="alert" hidden></span></label><label class="prompt-attachment" for="a-reference-image"><span>提交 A 版时附加参考图（可选）</span><small>${aReferenceImageUrl ? '已上传，可重新选择' : '支持 PNG、JPEG、WebP，最大 8MB'}</small><input id="a-reference-image" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择 A 版参考图" aria-describedby="a-image-feedback"></label><p class="a-image-feedback" id="a-image-feedback" data-a-image-feedback role="status" hidden></p><div data-a-image-preview></div><div class="detail-actions"><span class="detail-state">确认后解锁提示词 B</span><button class="text-button" type="button" data-detail-action="save-brief">保存简报</button><button class="text-button" type="button" data-detail-action="regenerate-a">重新发送 A 版</button><button class="button button-primary" type="button" data-detail-action="confirm-a">确认描述词 A<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
         } else if (stepName === 'b') {
           const editing = promptBEdit ?? storedBEditorRaw();
-          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(editing.positivePrompt)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(editing.negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === editing.aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(editing.platformParamsText)}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
+          host.innerHTML = `<p data-a-confirmation-state role="status" hidden></p><p data-b-save-state role="status" hidden></p><label for="prompt-editor">正向提示词 B<textarea id="prompt-editor">${escapeHtml(editing.positivePrompt)}</textarea></label><label for="negative-prompt-editor">负面提示词<textarea id="negative-prompt-editor">${escapeHtml(editing.negativePrompt)}</textarea></label><label for="aspect-ratio-editor">画幅<select id="aspect-ratio-editor">${allowedAspectRatios.map((ratio) => `<option value="${ratio}"${ratio === editing.aspectRatio ? ' selected' : ''}>${ratio}</option>`).join('')}</select></label><label for="platform-params-editor">平台参数（JSON，可选）<textarea id="platform-params-editor" rows="3" spellcheck="false" placeholder="{&quot;seed&quot;: 42}">${escapeHtml(editing.platformParamsText)}</textarea><small>仅填写通用键值，值支持字符串、数字和布尔值。</small></label><div class="detail-actions"><span class="detail-state">确认后进入多平台生成</span><button class="text-button" type="button" data-detail-action="resend-b">重新发送 B 版</button><button class="button button-primary" type="button" data-detail-action="confirm-b">确认提示词 B<svg class="ui-icon"><use href="#i-arrow"></use></svg></button></div>`;
           // Set DOM values after HTML parsing so an initial line feed is not stripped.
           host.querySelector('#prompt-editor').value = editing.positivePrompt;
           host.querySelector('#negative-prompt-editor').value = editing.negativePrompt;
@@ -1803,6 +1823,7 @@
           if (resultGenerated) renderResults();
         }
         refreshAConfirmationState();
+        refreshBConfirmationState();
         if (stepName === 'a') { refreshAImageFeedback(); refreshAImagePreview(); }
         if (shouldScroll) {
           const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
@@ -1986,6 +2007,7 @@
           if (error) error.hidden = false;
         }, { once: true }));
         results.querySelectorAll('[data-result-index]').forEach((button) => button.addEventListener('click', () => {
+          if (activeBOperation) { showToast('B 版正在保存，请完成后再选择结果'); return; }
           resultSelected = Number(button.dataset.resultIndex);
           renderResults();
           document.querySelector(`[data-result-index="${resultSelected}"]`)?.focus({ preventScroll: true });
@@ -2508,14 +2530,14 @@
       const refreshAConfirmationState = () => {
         refreshAFieldRequirements();
         const imageInput = detailContents.a.querySelector('#a-reference-image');
-        if (imageInput) imageInput.disabled = Boolean(activeAOperation || pendingAConfirmation || agentBusy || interrupted);
+        if (imageInput) imageInput.disabled = Boolean(activeAOperation || activeBOperation || pendingAConfirmation || agentBusy || interrupted);
         const pending = isAConfirmationPending();
         document.querySelectorAll('[data-a-confirmation-state]').forEach((notice) => {
           notice.hidden = !pending;
           notice.textContent = 'A 版有待确认内容。旧提示词 B 和结果已保留，确认 A 后才可继续发送。';
         });
         document.querySelectorAll('[data-detail-action="confirm-b"], [data-detail-action="resend-b"], [data-detail-action="generate"], [data-detail-action="regenerate-results"]').forEach((button) => {
-          if (pending || activeAOperation || pendingAConfirmation) {
+          if (pending || activeAOperation || activeBOperation || pendingAConfirmation) {
             if (!Object.prototype.hasOwnProperty.call(button.dataset, 'aConfirmationDisabled')) button.dataset.aConfirmationDisabled = String(button.disabled);
             button.disabled = true;
           } else if (Object.prototype.hasOwnProperty.call(button.dataset, 'aConfirmationDisabled')) {
@@ -2524,24 +2546,27 @@
           }
         });
         for (const input of [detailContents.a.querySelector('#description-editor'), ...agentDraftFieldDefinitions.map((definition) => detailContents.a.querySelector(`[data-agent-field="${definition.key}"]`))]) {
-          if (input) input.readOnly = Boolean(activeAOperation?.committing);
+          if (input) input.readOnly = Boolean(activeAOperation?.committing || activeBOperation);
         }
         for (const action of ['save-brief', 'confirm-a', 'regenerate-a']) {
           const button = detailContents.a.querySelector(`[data-detail-action="${action}"]`);
-          if (button) button.disabled = Boolean(activeAOperation || pendingAConfirmation || agentBusy || interrupted);
+          if (button) button.disabled = Boolean(activeAOperation || activeBOperation || pendingAConfirmation || agentBusy || interrupted);
         }
       };
       const guardAConfirmation = () => {
+        if (activeBOperation) { showToast('B 版正在保存，请完成后再确认或发送'); return false; }
         if (!activeAOperation && !pendingAConfirmation && !isAConfirmationPending()) return true;
         refreshAConfirmationState();
         showToast('请先确认 A 版，再确认或发送提示词 B');
         return false;
       };
       const captureASendingContext = () => ({ projectId, routeUrl: projectApiUrl, session: projectSession,
-        content: JSON.stringify(editorAContent()), baseline: JSON.stringify(resolveAcceptedASnapshot()) });
+        content: JSON.stringify(editorAContent()), baseline: JSON.stringify(resolveAcceptedASnapshot()),
+        b: JSON.stringify([promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion]) });
       const isASendingContextCurrent = (sending) => sending.projectId === projectId && sending.routeUrl === projectApiUrl
-        && sending.session === projectSession && !activeAOperation && !pendingAConfirmation && !isAConfirmationPending()
-        && sending.content === JSON.stringify(editorAContent()) && sending.baseline === JSON.stringify(resolveAcceptedASnapshot());
+        && sending.session === projectSession && !activeAOperation && !activeBOperation && !pendingAConfirmation && !isAConfirmationPending()
+        && sending.content === JSON.stringify(editorAContent()) && sending.baseline === JSON.stringify(resolveAcceptedASnapshot())
+        && sending.b === JSON.stringify([promptB, negativePrompt, aspectRatio, platformParams, platformOverrides, promptBSource, promptBVersion, promptBTemplateId, promptBTemplateVersion]);
       const captureAOperation = () => ({ projectId, routeUrl: projectApiUrl, session: projectSession, runId: currentAgentRunId,
         inputSignature: agentInputSignature(), content: editorAContent(), rawText: readAEditorRawText(), rawEdit: descriptionARawEdit, collected: collectAgentDraftPatch() });
       const isAOperationCurrent = (operation) => activeAOperation === operation && operation.projectId === projectId
@@ -2649,7 +2674,7 @@
         return true;
       };
       const saveAgentDraftEdits = async ({ showFeedback = true } = {}) => {
-        if (activeAOperation || pendingAConfirmation || agentBusy || interrupted) return { changed: false };
+        if (activeAOperation || activeBOperation || pendingAConfirmation || agentBusy || interrupted) return { changed: false };
         resolveAcceptedASnapshot();
         const operation = captureAOperation();
         setAOperation(operation);
@@ -2760,7 +2785,7 @@
         await confirmDescriptionOperation(pending.operation);
       };
       const confirmDescription = async () => {
-        if (activeAOperation || pendingAConfirmation || agentBusy || interrupted) return;
+        if (activeAOperation || activeBOperation || pendingAConfirmation || agentBusy || interrupted) return;
         resolveAcceptedASnapshot();
         const operation = captureAOperation();
         const semanticErrors = validateDescriptionAConfirmation(operation.content.rawText);
@@ -2812,70 +2837,121 @@
         return { positivePrompt, negativePrompt: nextNegativePrompt, aspectRatio: nextAspectRatio, platformParams: params.ok ? params.value : {}, platformOverrides: nextPlatformOverrides, errors: [...validation.errors, ...(params.ok ? [] : [params.message]), ...overrideEditor.errors] };
       };
       const bPlatformOverridesBaseline = () => platformOverridesDirty && platformOverridesBeforeEdit ? platformOverridesBeforeEdit : platformOverrides;
-      const confirmPrompt = () => {
-        if (!guardAConfirmation()) return;
-        const bFields = readBExecutionFields();
-        const nextPrompt = bFields.positivePrompt;
-        if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
-        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(bFields.platformOverrides) !== JSON.stringify(bPlatformOverridesBaseline())));
-        if (changed && progress > 4) {
-          const accepted = window.confirm('提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？');
-          if (!accepted) return;
-          resetDownstream(3);
-        }
-        promptB = nextPrompt;
-        negativePrompt = bFields.negativePrompt;
-        aspectRatio = bFields.aspectRatio;
-        platformParams = bFields.platformParams;
-        replaceBEditorEdits();
-        platformOverrides = bFields.platformOverrides;
-        commitPlatformOverrides();
-        if (changed) clearPromptBTemplateProvenance();
-        promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
-        progress = Math.max(progress, 4);
-        markStepComplete(3);
-        setCurrentStep(4, '等待生成');
-        unlockCard('c');
-        setStatus('可在所选平台生成', 'is-ready');
-        persistState();
-        syncProject();
-        openDetail('c');
-        showToast('提示词 B 已确认，多平台生成已解锁');
+      const bConfirmationSignature = () => JSON.stringify({
+        projectId, routeUrl: projectApiUrl, session: projectSession, a: editorAContent(), acceptedA: resolveAcceptedASnapshot(),
+        raw: readBEditorRaw(), promptB, negativePrompt, aspectRatio, platformParams, platformOverrides,
+        source: promptBSource, version: promptBVersion, templateId: promptBTemplateId, templateVersion: promptBTemplateVersion,
+        platforms: [...selectedGenerationPlatforms], product: productState, currentAgentRunId, currentAgentRunVersion,
+        progress, generationJobId, generationResendSourceJobId, resultGenerated, resultSelected,
+        results: persistedResults(), versions, invalidatedGenerationJobs: [...invalidatedGenerationJobs]
+      });
+      const refreshBConfirmationState = () => {
+        const busy = Boolean(activeBOperation);
+        document.querySelectorAll('[data-b-save-state]').forEach((notice) => {
+          notice.hidden = !busy;
+          notice.textContent = busy ? '正在保存 B 版；保存成功后才确认或重新发送。' : '';
+        });
+        document.querySelectorAll('#prompt-editor, #negative-prompt-editor, #platform-params-editor, [data-platform-override]').forEach((input) => { input.readOnly = busy; });
+        document.querySelectorAll('#aspect-ratio-editor, input[name="generation-platform"]').forEach((input) => { input.disabled = busy; });
       };
+      const setBOperation = (operation) => {
+        activeBOperation = operation;
+        setAgentBusy(Boolean(operation));
+        refreshAConfirmationState();
+        refreshBConfirmationState();
+      };
+      const isBOperationCurrent = (operation) => activeBOperation === operation && !activeAOperation && !pendingAConfirmation
+        && !isAConfirmationPending() && operation.signature === bConfirmationSignature();
+      const confirmedBProject = (fields, changed, clearDownstream) => {
+        const source = changed && String(promptBSource || '').startsWith('template:') ? 'workbench' : promptBSource;
+        const version = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
+        const templateId = changed ? '' : promptBTemplateId;
+        const templateVersion = changed ? 0 : promptBTemplateVersion;
+        const next = { ...serializeProject(), promptB: fields.positivePrompt, promptBEdit: null,
+          negativePrompt: fields.negativePrompt, aspectRatio: fields.aspectRatio, platformParams: fields.platformParams,
+          platformOverrides: fields.platformOverrides, promptBSource: source, promptBVersion: version,
+          promptBTemplateId: templateId, promptBTemplateVersion: templateVersion, progress: clearDownstream ? 4 : Math.max(progress, 4),
+          promptBExecution: { positive_prompt: fields.positivePrompt, negative_prompt: fields.negativePrompt, aspect_ratio: fields.aspectRatio,
+            platform_params: fields.platformParams, platform_overrides: fields.platformOverrides, source, version, templateId, templateVersion }
+        };
+        if (clearDownstream) Object.assign(next, {
+          resultGenerated: false, resultSelected: -1, generatedResults: [], generationJobId: '', generationResendSourceJobId: '', doubaoBridgeState: 'idle',
+          invalidatedGenerationJobs: [...new Set([...invalidatedGenerationJobs, ...(generationJobId ? [generationJobId] : [])])].slice(-20)
+        });
+        return next;
+      };
+      const submitBConfirmation = async (resend = false) => {
+        if (activeBOperation) { showToast('B 版正在保存，请完成后再确认或发送'); return false; }
+        if (!guardAConfirmation()) return false;
+        if (agentBusy || interrupted) return false;
+        if (projectWriteCount) { showToast('项目正在更新，请完成后再确认 B 版'); return false; }
+        if (doubaoBridgeState === 'preparing' && !generationJobId) { showToast('生图任务正在提交，请完成后再确认 B 版'); return false; }
+        const fields = readBExecutionFields();
+        if (fields.errors.length) { showToast(fields.errors[0]); return false; }
+        const changed = Boolean(promptB && (fields.positivePrompt !== promptB || fields.negativePrompt !== negativePrompt || fields.aspectRatio !== aspectRatio || JSON.stringify(fields.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(fields.platformOverrides) !== JSON.stringify(bPlatformOverridesBaseline())));
+        if (changed && progress > 4 && !window.confirm(resend
+          ? '重新发送前会清除当前生成结果，但会保留旧任务记录。是否继续？'
+          : '提示词 B 已修改。当前生成结果将失效，需要重新生成。是否清除已有结果并继续？')) return false;
+        const operation = { id: ++bConfirmationSequence, signature: bConfirmationSignature(), routeUrl: projectApiUrl, projectId, session: projectSession, messages: [] };
+        const clearDownstream = changed && (resend || progress > 4);
+        let committed = false;
+        setBOperation(operation);
+        try {
+          await serverSyncQueue;
+          if (!isBOperationCurrent(operation)) return false;
+          const candidate = confirmedBProject(fields, changed, clearDownstream);
+          const response = await fetch(operation.routeUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(candidate) })
+            .catch(() => { throw new Error('B 版未能保存：网络连接失败，原提示词、编辑和结果已保留，请重试'); });
+          if (!isBOperationCurrent(operation)) return false;
+          if (!response.ok) throw new Error(`B 版未能保存：服务端返回 HTTP ${response.status || '错误'}，原提示词、编辑和结果已保留，请重试`);
+          if (clearDownstream) { resetDownstream(3); generationResendSourceJobId = ''; generationRequestKey = ''; }
+          promptB = candidate.promptB;
+          negativePrompt = candidate.negativePrompt;
+          aspectRatio = candidate.aspectRatio;
+          platformParams = candidate.platformParams;
+          platformOverrides = candidate.platformOverrides;
+          promptBSource = candidate.promptBSource;
+          promptBVersion = candidate.promptBVersion;
+          promptBTemplateId = candidate.promptBTemplateId;
+          promptBTemplateVersion = candidate.promptBTemplateVersion;
+          replaceBEditorEdits();
+          commitPlatformOverrides();
+          progress = candidate.progress;
+          markStepComplete(3);
+          setCurrentStep(4, '等待生成');
+          unlockCard('c');
+          setStatus('可在所选平台生成', 'is-ready');
+          persistState();
+          committed = true;
+        } catch (error) {
+          if (isBOperationCurrent(operation)) showToast(error.message?.startsWith('B 版未能保存') ? error.message : 'B 版未能保存，原提示词、编辑和结果已保留，请重试');
+        } finally {
+          if (activeBOperation === operation) {
+            setBOperation(null);
+            // Replay platform updates after the saved candidate has either committed or failed.
+            // Changed B invalidates its old job, so normal message guards discard obsolete results.
+            if (operation.projectId === projectId && operation.routeUrl === projectApiUrl && operation.session === projectSession) {
+              operation.messages.forEach((message) => window.postMessage(message, '*'));
+            }
+          }
+        }
+        if (!committed) return false;
+        openDetail('c');
+        if (resend) {
+          const signature = bConfirmationSignature();
+          window.setTimeout(() => {
+            if (operation.id === bConfirmationSequence && !activeBOperation && !activeAOperation && !pendingAConfirmation && !isAConfirmationPending() && signature === bConfirmationSignature()) generateResults();
+          }, 0);
+        } else showToast('提示词 B 已确认，多平台生成已解锁');
+        return true;
+      };
+      const confirmPrompt = () => submitBConfirmation(false);
       const regenerateDescriptionA = () => {
         editingAgent = true;
         nextButton.disabled = false;
         nextButton.click();
       };
-      const resendPromptB = () => {
-        if (!guardAConfirmation()) return;
-        const bFields = readBExecutionFields();
-        const nextPrompt = bFields.positivePrompt;
-        if (bFields.errors.length) { showToast(bFields.errors[0]); return; }
-        const changed = Boolean(promptB && (nextPrompt !== promptB || bFields.negativePrompt !== negativePrompt || bFields.aspectRatio !== aspectRatio || JSON.stringify(bFields.platformParams) !== JSON.stringify(platformParams) || JSON.stringify(bFields.platformOverrides) !== JSON.stringify(bPlatformOverridesBaseline())));
-        if (changed && progress > 4) {
-          const accepted = window.confirm('重新发送前会清除当前生成结果，但会保留旧任务记录。是否继续？');
-          if (!accepted) return;
-        }
-        if (changed) resetDownstream(3);
-        promptB = nextPrompt;
-        negativePrompt = bFields.negativePrompt;
-        aspectRatio = bFields.aspectRatio;
-        platformParams = bFields.platformParams;
-        replaceBEditorEdits();
-        platformOverrides = bFields.platformOverrides;
-        commitPlatformOverrides();
-        if (changed) clearPromptBTemplateProvenance();
-        promptBVersion = Math.max(1, Number(promptBVersion) || 1) + (changed ? 1 : 0);
-        progress = Math.max(progress, 4);
-        markStepComplete(3);
-        setCurrentStep(4, '等待生成');
-        unlockCard('c');
-        persistState();
-        syncProject();
-        openDetail('c');
-        window.setTimeout(() => generateResults(), 0);
-      };
+      const resendPromptB = () => submitBConfirmation(true);
       const resendGeneration = () => {
         if (!guardAConfirmation()) return;
         if (!selectedGenerationPlatforms.size) { showToast('请先选择至少一个生图平台'); return; }
@@ -3016,78 +3092,86 @@
         }
       };
       const uploadGeneratedResults = async (files) => {
-        const selectedFiles = [...(files || [])].filter((file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)).slice(0, 4);
-        if (!selectedFiles.length) { showToast('请选择 PNG、JPEG 或 WebP 结果图片'); return; }
-        doubaoBridgeState = 'importing';
-        const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
-        if (bridgeStatus) bridgeStatus.textContent = `正在保存 ${selectedFiles.length} 张结果图片…`;
+        if (activeBOperation) { showToast('B 版正在保存，请完成后再导入结果'); return; }
+        projectWriteCount += 1;
         try {
-          const uploaded = [];
-          for (const file of selectedFiles) {
-            if (file.size > 8 * 1024 * 1024) throw new Error('单张结果图片不能超过 8MB');
-            const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok || !payload.url) throw new Error(payload.error || '结果图片保存失败');
-            uploaded.push({ url: new URL(payload.url, window.location.href).href, sourceUrl: 'manual-upload' });
+          const selectedFiles = [...(files || [])].filter((file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)).slice(0, 4);
+          if (!selectedFiles.length) { showToast('请选择 PNG、JPEG 或 WebP 结果图片'); return; }
+          doubaoBridgeState = 'importing';
+          const bridgeStatus = detailContent.querySelector('#generation-bridge-status');
+          if (bridgeStatus) bridgeStatus.textContent = `正在保存 ${selectedFiles.length} 张结果图片…`;
+          try {
+            const uploaded = [];
+            for (const file of selectedFiles) {
+              if (file.size > 8 * 1024 * 1024) throw new Error('单张结果图片不能超过 8MB');
+              const response = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload.url) throw new Error(payload.error || '结果图片保存失败');
+              uploaded.push({ url: new URL(payload.url, window.location.href).href, sourceUrl: 'manual-upload' });
+            }
+            generatedResults = [
+              ...generatedResults.filter((result) => result.sourceUrl !== 'manual-upload'),
+              ...uploaded.map((result) => ({ ...result, platform: 'doubao', jobId: generationJobId }))
+            ];
+            resultGenerated = true;
+            resultSelected = -1;
+            doubaoBridgeState = 'result';
+            persistState();
+            syncProject();
+            renderResults();
+            if (bridgeStatus) bridgeStatus.textContent = `已保存 ${uploaded.length} 张结果，请选择后导入。`;
+            showToast(`已导入 ${uploaded.length} 张结果图片`);
+          } catch (error) {
+            doubaoBridgeState = 'import_error';
+            if (bridgeStatus) bridgeStatus.textContent = error.message || '结果图片保存失败';
+            showToast(error.message || '结果图片保存失败');
           }
-          generatedResults = [
-            ...generatedResults.filter((result) => result.sourceUrl !== 'manual-upload'),
-            ...uploaded.map((result) => ({ ...result, platform: 'doubao', jobId: generationJobId }))
-          ];
-          resultGenerated = true;
-          resultSelected = -1;
-          doubaoBridgeState = 'result';
-          persistState();
-          syncProject();
-          renderResults();
-          if (bridgeStatus) bridgeStatus.textContent = `已保存 ${uploaded.length} 张结果，请选择后导入。`;
-          showToast(`已导入 ${uploaded.length} 张结果图片`);
-        } catch (error) {
-          doubaoBridgeState = 'import_error';
-          if (bridgeStatus) bridgeStatus.textContent = error.message || '结果图片保存失败';
-          showToast(error.message || '结果图片保存失败');
-        }
+        } finally { projectWriteCount -= 1; }
       };
       const openDoubaoHelp = () => {
         openModal('扩展与手动操作', `<p class="modal-note">任务会复用已打开的平台页面，逐个平台检查登录后自动填入并提交生成。未打开目标平台时，请使用“打开所选平台”并登录，再回工作台发起任务。</p><ol class="help-list"><li>在 Edge 或 Chrome 打开扩展管理页，加载项目中的 <code>doubao-extension/</code> 文件夹。</li><li>先打开并登录要使用的生图平台；工作台不会在任务开始时自动创建标签页。</li><li>回到工作台启动生成，结果会自动同步到此处供你选择。</li><li>若自动操作失败，可以手动填写、生成并导入结果图片。</li></ol><div class="modal-actions"><button class="button button-secondary" type="button" data-modal-action="cancel">关闭</button><button class="button button-primary" type="button" data-modal-action="copy-prompt">复制提示词 B</button></div>`);
       };
       const completeSelectedImport = async (result) => {
-        if (resultSelected < 0 || !result) return;
-        const selectedKey = resultKey(result);
-        if (result?.imageDataUrl) {
-          const imageResponse = await fetch(result.imageDataUrl);
-          const imageBlob = await imageResponse.blob();
-          const contentType = result.imageMimeType || imageBlob.type || 'image/png';
-          const upload = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': contentType }, body: imageBlob });
-          const uploaded = await upload.json().catch(() => ({}));
-          if (!upload.ok || !uploaded.url) throw new Error(uploaded.error || '结果图片保存失败。');
-          result = { ...result, sourceUrl: result.sourceUrl || result.url, url: new URL(uploaded.url, window.location.href).href, saved: true };
-          delete result.imageDataUrl;
-          delete result.imageMimeType;
-        }
-        if (generationJobId && !result?.jobRecorded) {
-          const record = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/results`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jobId: generationJobId, platform: result.platform || 'doubao', attemptId: result.attemptId || generationPlatforms[result.platform || 'doubao']?.attemptId || '', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname, sourceUrl: result.sourceUrl || result.url, promptVersion: Number(result.promptVersion || promptBVersion) || 1, ...(result.dimensions ? { dimensions: result.dimensions } : {}) })
-          });
-          const payload = await record.json().catch(() => ({}));
-          if (!record.ok) throw new Error(payload.error || '结果记录保存失败。');
-          result.jobRecorded = true;
-        }
-        const selectedIndex = generatedResults.findIndex((item) => resultKey(item) === selectedKey);
-        if (selectedIndex < 0) throw new Error('结果已更新，请重新选择要归档的图片。');
-        resultSelected = selectedIndex;
-        generatedResults[selectedIndex] = result;
-        progress = 5;
-        markStepComplete(4);
-        setStatus('结果已归档', 'is-ready');
-        persistState();
-        syncProject();
-        renderResults();
-        const action = detailContent.querySelector('[data-detail-action="import"]');
-        if (action) action.textContent = '已归档到项目';
-        showToast('选中的图片已归档到项目');
+        if (activeBOperation) { showToast('B 版正在保存，请完成后再导入结果'); return; }
+        projectWriteCount += 1;
+        try {
+          if (resultSelected < 0 || !result) return;
+          const selectedKey = resultKey(result);
+          if (result?.imageDataUrl) {
+            const imageResponse = await fetch(result.imageDataUrl);
+            const imageBlob = await imageResponse.blob();
+            const contentType = result.imageMimeType || imageBlob.type || 'image/png';
+            const upload = await fetch(`${projectApiUrl}/assets`, { method: 'POST', headers: { 'Content-Type': contentType }, body: imageBlob });
+            const uploaded = await upload.json().catch(() => ({}));
+            if (!upload.ok || !uploaded.url) throw new Error(uploaded.error || '结果图片保存失败。');
+            result = { ...result, sourceUrl: result.sourceUrl || result.url, url: new URL(uploaded.url, window.location.href).href, saved: true };
+            delete result.imageDataUrl;
+            delete result.imageMimeType;
+          }
+          if (generationJobId && !result?.jobRecorded) {
+            const record = await fetch(`${projectApiUrl}/generation-jobs/${encodeURIComponent(generationJobId)}/results`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jobId: generationJobId, platform: result.platform || 'doubao', attemptId: result.attemptId || generationPlatforms[result.platform || 'doubao']?.attemptId || '', id: result.id, candidateId: result.candidateId || result.id, assetUrl: new URL(result.url, window.location.href).pathname, sourceUrl: result.sourceUrl || result.url, promptVersion: Number(result.promptVersion || promptBVersion) || 1, ...(result.dimensions ? { dimensions: result.dimensions } : {}) })
+            });
+            const payload = await record.json().catch(() => ({}));
+            if (!record.ok) throw new Error(payload.error || '结果记录保存失败。');
+            result.jobRecorded = true;
+          }
+          const selectedIndex = generatedResults.findIndex((item) => resultKey(item) === selectedKey);
+          if (selectedIndex < 0) throw new Error('结果已更新，请重新选择要归档的图片。');
+          resultSelected = selectedIndex;
+          generatedResults[selectedIndex] = result;
+          progress = 5;
+          markStepComplete(4);
+          setStatus('结果已归档', 'is-ready');
+          persistState();
+          syncProject();
+          renderResults();
+          const action = detailContent.querySelector('[data-detail-action="import"]');
+          if (action) action.textContent = '已归档到项目';
+          showToast('选中的图片已归档到项目');
+        } finally { projectWriteCount -= 1; }
       };
       const syncGenerationStatus = (status, message, results, platform = 'doubao', meta = {}) => {
         if (!generationJobId) return;
@@ -3112,6 +3196,7 @@
         }, 80));
       };
       const importResult = () => {
+        if (activeBOperation) { showToast('B 版正在保存，请完成后再归档结果'); return; }
         if (resultSelected < 0) {
           showToast('请先选择一张结果');
           return;
@@ -3205,6 +3290,7 @@
         if (bridgeAction === 'manual-result') detailContent.querySelector('#result-upload-input')?.click();
       });
       detailContent.addEventListener('input', (event) => {
+        if (activeBOperation) return;
         const editor = event.target.closest('[data-platform-override]');
         if (!editor) return;
         const parsed = parsePlatformParamsEditor(editor.value);
@@ -3218,6 +3304,7 @@
         syncProject();
       });
       workflowCanvas.addEventListener('change', (event) => {
+        if (activeBOperation) return;
         if (cacheBEditorInput(event.target)) return;
         if (event.target.matches('input[name="generation-platform"]')) {
           selectedGenerationPlatforms = new Set([...detailContent.querySelectorAll('input[name="generation-platform"]:checked')].map((input) => input.value));
@@ -3233,6 +3320,7 @@
 
       window.addEventListener('message', (event) => {
         if (event.source !== window || event.data?.source !== 'zaotu-doubao-extension') return;
+        if (activeBOperation) { activeBOperation.messages.push(event.data); return; }
         const message = event.data;
         const taskMessageTypes = new Set(['PLATFORM_STATUS', 'PLATFORM_RESULT_CANDIDATES', 'PLATFORM_ERROR', 'DOUBAO_STATUS', 'DOUBAO_ERROR', 'DOUBAO_RESULT_CANDIDATES']);
         if (taskMessageTypes.has(message.type) && !message.openEvent && (!message.jobId || !message.attemptId)) return;

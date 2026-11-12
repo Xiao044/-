@@ -26,7 +26,7 @@ const setup = () => {
   c.escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   c.workflowCanvas = { addEventListener(type, listener) { (c.listeners[type] ||= []).push(listener); } }; c.listeners = {};
   c.window.setTimeout = (fn) => s.calls.push(['timer', fn]);
-  const helpers = []; // The shared scene fixture loads the optional B helpers.
+  const helpers = ['bConfirmationSignature', 'refreshBConfirmationState', 'setBOperation', 'isBOperationCurrent', 'confirmedBProject', 'submitBConfirmation'].filter((name) => source.includes(`      const ${name} =`));
   const inputStart = source.indexOf("      workflowCanvas.addEventListener('input', (event) => {", source.indexOf("message.type === 'PLATFORM_IMPORTED'"));
   const inputEnd = source.indexOf("\n      modal.addEventListener('click'", inputStart);
   const changeStart = source.indexOf("      workflowCanvas.addEventListener('change', (event) => {");
@@ -65,7 +65,7 @@ test('cancelled B confirmation and resend retain exact edits and do not submit',
   for (const action of ['confirmPrompt', 'resendPromptB']) { const s = setup(); s.context.progress = 5; s.context.window.confirm = () => false; const values = { ...edits, platformParamsText: ' {"seed": 9} ' }; s.edit(values); s.context.bui[action](); s.reopen(); assert.deepEqual(s.values(), values); assert.equal(s.context.promptB, '旧 B'); assert.equal(s.requests.length, 0); }
 });
 test('successful B confirmation and resend clear cache after committing canonical values and old DOM', async () => {
-  for (const action of ['confirmPrompt', 'resendPromptB']) { const s = setup(); s.edit({ ...edits, platformParamsText: ' {"seed": 9} ' }); s.context.openDetail = () => {}; s.context.bui[action](); await s.context.serverSyncQueue; assert.equal(s.context.promptBEdit, null); assert.equal(s.context.promptB, '新 <B>\n第二行'); assert.equal(s.context.negativePrompt, '不要水印'); assert.equal(s.context.aspectRatio, '16:9'); assert.deepEqual(plain(s.context.platformParams), { seed: 9 }); assert.equal(s.controls.positivePrompt.value, s.context.promptB); assert.equal(s.requests.at(-1).body.promptBEdit, null); s.reopen(); assert.equal(s.controls.platformParamsText.value, JSON.stringify({ seed: 9 }, null, 2)); }
+  for (const action of ['confirmPrompt', 'resendPromptB']) { const s = setup(); s.edit({ ...edits, platformParamsText: ' {"seed": 9} ' }); s.context.openDetail = () => {}; await s.context.bui[action](); assert.equal(s.context.promptBEdit, null); assert.equal(s.context.promptB, '新 <B>\n第二行'); assert.equal(s.context.negativePrompt, '不要水印'); assert.equal(s.context.aspectRatio, '16:9'); assert.deepEqual(plain(s.context.platformParams), { seed: 9 }); assert.equal(s.controls.positivePrompt.value, s.context.promptB); assert.equal(s.requests.at(-1).body.promptBEdit, null); s.reopen(); assert.equal(s.controls.platformParamsText.value, JSON.stringify({ seed: 9 }, null, 2)); }
 });
 test('startup restores empty or malformed JSON editing strings and old projects have no cache', () => {
   for (const cache of [edits, { positivePrompt: '', negativePrompt: '', aspectRatio: '1:1', platformParamsText: '' }, null]) { const s = setup(); s.startup({ promptB: '持久 B', ...(cache ? { promptBEdit: cache } : {}) }); s.context.bui.openDetail('b', false); assert.deepEqual(plain(s.context.promptBEdit), cache); assert.equal(s.controls.positivePrompt.value, cache ? cache.positivePrompt : '持久 B'); }
