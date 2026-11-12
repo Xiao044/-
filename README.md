@@ -1,77 +1,94 @@
-# 商品图工作台
+# 商品图工作台（造图）
 
-以奶油白、浅麦黄为主色的商品生图工作台高保真静态页面。视觉方向参考 Brightland 与 Headspace，采用桌面工作流布局，并适配平板和手机宽度。
+本地运行的商品图片创作工作台，使用 Node.js、浏览器页面和 Chrome/Edge 扩展。当前处于 **V2.0 开发与手动验收阶段**，尚未正式发布。
 
-完整的产品需求、已确认决策、当前完成边界和开发顺序见 [`PROJECT_REQUIREMENTS.md`](./PROJECT_REQUIREMENTS.md)。
+## 当前主线
 
-## 查看
+```text
+简短描述／几个关键词
+    → 知识库整合＋DeepSeek API → A
+    → 用户选择的网页端文字模型 → B
+    → 用户另行选择的生图模型 → 图片 → 挑选归档
+```
 
-直接用浏览器打开 `index.html` 可以查看静态界面，无需安装依赖。要使用 DeepSeek、项目服务端保存和商品图片上传，请按下面的 Node 服务方式运行。
+**知识库从零建设、内容由用户后续收集，现已按用户要求将框架和内容建设一并后置。** 当前优先复用已有 DS Agent 生成 A，开发独立的网页模型生成 B、分别选择文字/生图模型及 B→生图衔接；此阶段不声称 A 已有知识库增强。网页 B 已新增独立文字任务、候选与来源链，可选择豆包或 ChatGPT 的当前页面模型（实验性、真实完整流程待验收）；手填/模板作为兼容回退保留，不表示长期知识增强链路已完成。
 
-如果只查看页面，也可以在此目录启动静态服务器：
+## 运行
 
-    python -m http.server 5173 --bind 127.0.0.1
+需要 Node.js（项目使用内置模块，无 `npm install` 步骤）。首次配置：
 
-然后打开 http://127.0.0.1:5173 。
+```powershell
+if (-not (Test-Path -LiteralPath '.env')) { Copy-Item -LiteralPath '.env.example' -Destination '.env' }
+# 在 .env 填入服务端 DEEPSEEK_API_KEY；不要覆盖已有配置。
+node server.js
+```
 
-## 接入 DeepSeek
+已有配置时直接运行 `node server.js`，打开 [本地工作台](http://127.0.0.1:5173/)。直接打开 `index.html` 只能看静态界面，不能替代项目 API、上传或模型调用。
 
-AI 接入使用 Node 服务作为后端代理，API Key 只放在服务器环境变量或本地 `.env`，不会写入网页代码。先复制配置文件：
+**升级使用：** 停止旧 Node 进程后重新运行 `node server.js`，让新增 `/text-jobs` API 生效；扩展需重载并刷新工作台及平台页面，工作台应显示 0.5.1。仅刷新网页不能升级已运行的后端。
 
-    Copy-Item .env.example .env
+密钥只放 `.env` 或服务端环境变量，不进入前端、文档、日志或 Git。部署步骤见 [deploy/README.md](deploy/README.md)；存在部署说明不表示云环境已验收。
 
-然后编辑 `.env`，填入自己的 `DEEPSEEK_API_KEY`，启动服务：
+## 文档从哪里看
 
-    node server.js
+| 需要了解 | 文档 |
+|---|---|
+| 产品需求和已确认规则 | [PROJECT_REQUIREMENTS.md](PROJECT_REQUIREMENTS.md) |
+| V2/V3 范围与实施顺序 | [VERSION_PLAN.md](VERSION_PLAN.md) |
+| 最新进度、测试、验收和发布状态 | [agent/PROGRESS.md](agent/PROGRESS.md) |
+| A/B 重建技术方案 | [agent/AB_REBUILD_PLAN.md](agent/AB_REBUILD_PLAN.md) |
+| 已有 Agent 与当前问题 | [后端说明](agent/AGENT_BACKEND_PLAN.md)、[问题清单](agent/CREATIVE_FLOW_ISSUES.md) |
+| 知识资料以后放哪里 | [knowledge/README.md](knowledge/README.md) |
+| 目录整理与历史记录 | [文档索引](docs/README.md)、[维护记录](docs/MAINTENANCE.md) |
 
-打开 http://127.0.0.1:5173 。页面中的“提交场景描述”和“生成描述词 A”会调用 `/api/agent`。没有配置 Key 时接口会返回明确的配置错误，页面不会把本地演示结果误当成真实 AI 输出。
+历史证据只在 `docs/archive/` 追溯；不把历史“当前状态”或旧模型职责当成今天需求。
 
-Ubuntu + Nginx 部署步骤见 [`deploy/README.md`](./deploy/README.md)，站点配置模板见 [`deploy/zaotu.conf.example`](./deploy/zaotu.conf.example)。
+## 当前可用底座与边界
 
-## 当前范围
+- 商品资料/场景、DS 追问和 A 生成；A/B 编辑、确认和未保存文本恢复。
+- 项目 JSON 保存与浏览器本地恢复、图片上传、版本、任务中心、资产/质量标签、模板和导入导出。
+- 本地扩展为 **0.5.1**：保留豆包精确发送、版本保护、原图过滤/同图合并，新增独立文字任务桥接；安装/重载见 [扩展说明](doubao-extension/README.md)。
+- 四平台仍需 Chrome/Edge 完整真实验收；网页 B 目前只有豆包/ChatGPT 的实验性文字适配，其他文字平台不开放，不能因已有生图 adapter 就宣称支持。
+- MySQL、OSS、登录/权限、团队协作和正式云部署属于后续 V3.0，尚未实现。备份恢复专项演练按原决策暂缓。
+- 最新测试数字与哪些修改未提交只在 [进度总览](agent/PROGRESS.md) 汇总，避免多份文档过期。
 
-- 商品资料与本地示例插画
-- 五个独立纵向节点组成的线性创作画布，滚动时连接线逐段显现
-- 可点击回退的顶部步骤流；确认修改时提示并清理受影响的下游内容
-- 横向滚动、吸附和导航的生图候选结果带
-- 左侧任务栏滑动高亮与就地子菜单、顶部项目下落面板、生图平台就地多选面板
-- 节点展开/收起、菜单开合、平台选择和按钮反馈动画，并支持减少动态效果设置
-- 商品主图与属性缩略图统一居中 contain 和比例容器，文字行高与图标基线统一
-- Agent 文字信息整理界面（只生成 A 版简单结构化提示词）
-- 节点中断入口
-- 描述词 A（支持参考图上传、重新发送）、提示词 B（支持重新发送）、多平台生图与结果导入的后续节点
-- 桌面、平板和手机响应式布局
+## 目录地图
 
-本版为高保真工作流原型：场景选择、节点中断/继续、商品资料编辑、商品图片上传、A 版参考图上传、A/B/结果重新发送、版本记录/恢复、新建项目和本地保存均可操作；DeepSeek 文字 Agent 已接入后端代理，只用于场景追问和 A 版简单结构化提示词生成。项目保存按钮会同时尝试写入 Node 服务的项目 JSON 存储，服务不可用时自动保留浏览器 `localStorage`。上传的 PNG、JPEG 或 WebP 图片会保存到 `data/uploads/<projectId>/` 并写入项目状态。多平台生图由网页负责平台选择、任务交互和结果挑选，Node 服务端负责任务状态与结果归档；浏览器扩展现已覆盖四个平台的统一桥接层和部分平台适配，真实网页兼容性仍需逐平台验收。数据库和正式对象存储尚未接入。
+```text
+index.html / styles.css           页面和样式
+scroll-workspace.js / .css        当前仍引用的滚动交互模块，不是旧版残留
+server.js / health.html           Node 服务与健康页
+agent/                           Agent 源码、迁移工具、当前专项计划/状态
+lib/                             图片 ZIP 等服务辅助模块
+assets/                          当前页面使用的本地资源
+scripts/                         数据归一化与发布 smoke 工具
+tests/                          自动化回归及 mock（全部保留）
+doubao-extension/                当前解压缩扩展目录，不迁移以免安装失效
+knowledge/                       知识资料筹备说明；私有 sources/ 默认忽略
+docs/                            文档入口、维护记录及单独历史归档
+deploy/                          部署说明与 Nginx 模板
+data/                           本地业务数据、uploads/、backups/（不提交 Git）
+.env / .env.example              私有配置 / 配置样例
+```
 
-## 导出已归档图片
+`data/` 中的当前项目、任务、版本、资产、模板和真实上传不是临时文件。历史旧备份已收纳至 `data/backups/legacy-2026-11-12.zip`，保留原字节校验信息；这不是当前完整备份，也不能覆盖恢复到最新项目。
 
-在项目工具栏点击“导出图片”，下载当前项目的 ZIP。包内 `images/` 保存已归档的 PNG、JPEG、WebP 原始文件，`manifest.json` 保存资产、平台、任务、尝试、提示词版本、标签、尺寸、来源地址、包内路径、字节数和 SHA-256。同一文件只存一份，每条资产保留自己的来源映射；旧资产只有 `url` 或缺少生命周期状态时沿用资产库的归档默认值。
+## 测试
 
-缺失、跨项目、不安全路径、符号链接或无法读取的图片会在清单里记录原因，页面显示未导出的数量。没有可用图片时仍可下载清单包。图片包不自动请求外部图片 URL，导出不会改变资产状态；项目 JSON 仍通过“导出项目”保存。
+在项目根目录运行：
 
-本地导出上限为每张 8 MiB、最多 1000 条已归档资产、完整 ZIP 64 MiB（包括清单与归档头）。超限返回明确错误，不下载截断包。接口为 `GET /api/projects/:id/export-images`，无需数据迁移；这项能力提供图片及来源导出，完整项目备份恢复和 ZIP 导入尚待后续建设。浏览器下载与四平台真实流程仍需实机验收。
+```powershell
+node --test tests/*.test.js
+node scripts/release-smoke.js
+```
 
-## 本轮平台验证（2026-10-25）
+自动化使用隔离数据和 mock，不能替代真实 DS、网页模型和 Chrome/Edge 手动验收。维护时保留测试、旧项目迁移脚本与当前滚动模块；版本由 Git 管理，不在根目录存放旧版运行副本、临时 diff、日志或截图。
 
-- 豆包：第一阶段代码接入；当前浏览器页面需要登录，仍需登录后在 Chrome/Edge 实测填入、上传、提交、结果读取和导入。
-- ChatGPT：已有统一桥接和平台专属结果筛选，尚未通过真实登录、提交和结果读取验收。
-- Gemini：已有统一桥接和平台专属结果筛选，尚未通过真实登录、提交和结果读取验收。
-- Lovart：当前网络不可达，页面访问返回 `ERR_CONNECTION_CLOSED`，暂不能进行网页适配验收。
+## 上传与导出
 
-## 文件
-
-- `index.html`：页面结构
-- `styles.css`：配色、组件和响应式样式
-- `scroll-workspace.css`、`scroll-workspace.js`：工作区吸顶、五步节点联动、滚动连接线和结果画廊导航
-- `assets/pearl-necklace.svg`：本地示例商品插画
-- `server.js`：DeepSeek 后端代理与静态文件服务
-- `lib/image-package.js`：只读图片包导出与 ZIP32 STORE 编码
-- `scripts/normalize-generation-jobs.js`：历史任务状态归一化脚本，运行前自动生成带时间戳的备份
-- `doubao-extension/`：网页操作桥接扩展（四个平台统一协议与部分适配，真实验收按平台推进）
-- `.env.example`：DeepSeek 配置模板
-
-## 后续计划
-
-完整的分版本目标、范围、非目标、验收条件、风险和回滚方式见 [`VERSION_PLAN.md`](./VERSION_PLAN.md)。后续两个大版本定义为 V2.0 稳定生产闭环和 V3.0 云端部署与团队协作。V2.0 先完成四平台浏览器扩展适配、任务中心、A 版简单结构化提示词、B 版用户编辑确认、版本恢复、结果资产库和导入导出；V3.0 再推进 MySQL、阿里云 OSS、账号权限、审计、监控、备份和基础协作。当前实现仍处于 V2.0 开发与验收阶段，四个平台必须按真实 Chrome/Edge 矩阵逐一验收后才能标记为已接入。
-
+- 上传支持 PNG/JPEG/WebP，当前单图 8 MiB；本地保存于 `data/uploads/<projectId>/`。
+- 项目 JSON 使用“导出项目”；归档图片使用“导出图片”，接口为 `GET /api/projects/:id/export-images`。
+- ZIP 中 `images/` 保存原图，`manifest.json` 记录资产、平台、任务/attempt、提示词版本、标签、尺寸、路径、字节数与 SHA-256。同文件只存一份，来源映射仍独立保留。
+- 缺失、跨项目、不安全路径、符号链接或不可读图片在清单中记录原因；不自动请求外部临时 URL，不改变资产状态。
+- 当前图片 ZIP 限额：单图 8 MiB、1000 条归档资产、完整 ZIP 64 MiB（含清单和头）；超限明确报错，不输出截断包。
+- 图片包不等于完整项目备份，尚不支持 ZIP 导入。完整下载/生成/归档与备份恢复仍需各自验收。

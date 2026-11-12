@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "造图 · 多平台工作流桥接",
-  "version": "0.4.1",
+  "version": "0.5.1",
   "description": "复用已打开的生图平台页面，检查登录状态，填入商品图和提示词并提交生成。",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": [
@@ -33,12 +33,12 @@
     },
     {
       "matches": ["https://www.doubao.com/*", "https://doubao.com/*", "https://*.doubao.com/*"],
-      "js": ["protocol.js", "content-doubao.js"],
+      "js": ["protocol.js", "content-doubao.js", "text-adapters.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["protocol.js", "platform-common.js", "content-chatgpt.js"],
+      "js": ["protocol.js", "platform-common.js", "content-chatgpt.js", "text-adapters.js"],
       "run_at": "document_idle"
     },
     {

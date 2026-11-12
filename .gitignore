@@ -6,3 +6,7 @@ Thumbs.db
 .env.*
 !*.env.example
 data/
+
+# Local review output and private knowledge source material
+.review-*.diff
+knowledge/sources/

@@ -1,4 +1,5 @@
 importScripts('protocol.js');
+const REQUIRED_DOUBAO_ADAPTER_VERSION = '0.5.1';
 const PLATFORM_URLS = {
   chatgpt: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
   gemini: ['https://gemini.google.com/*'],
@@ -30,13 +31,19 @@ const adapterFiles = {
 const connectPlatformTab = async (platform, tab) => {
   if (!tab?.id) throw Object.assign(new Error(`请先打开${platform}网页并登录。`), { needsPage: true });
   const ping = platform === 'doubao' ? 'ZAOTU_DOUBAO_PING' : 'ZAOTU_PLATFORM_PING';
-  try {
-    const response = await sendTabMessage(tab.id, { type: ping });
-    if (response?.ok && (platform === 'doubao' || response.platform === platform)) return tab;
-  } catch {}
+  const compatible = (response) => {
+    if (!response?.ok) return false;
+    if (['doubao', 'chatgpt'].includes(platform) && response.adapterVersion !== REQUIRED_DOUBAO_ADAPTER_VERSION) {
+      throw new Error(`${platform === 'doubao' ? '豆包' : 'ChatGPT'}页面仍在运行旧版或未知版本脚本（${response.adapterVersion || '未知'}）。请重载扩展并刷新豆包页面，需要 ${REQUIRED_DOUBAO_ADAPTER_VERSION}；本次未发送。`);
+    }
+    return platform === 'doubao' || response.platform === platform;
+  };
+  let response;
+  try { response = await sendTabMessage(tab.id, { type: ping }); } catch {}
+  if (compatible(response)) return tab;
   await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: adapterFiles[platform] });
-  const response = await sendTabMessage(tab.id, { type: ping });
-  if (!response?.ok) throw new Error(`${platform} 页面桥接脚本未就绪，请刷新页面后重试。`);
+  response = await sendTabMessage(tab.id, { type: ping });
+  if (!compatible(response)) throw new Error(`${platform} 页面桥接脚本未就绪，请刷新页面后重试。`);
   return tab;
 };
 
@@ -115,6 +122,7 @@ const toWorkbench = async (route, message) => {
 const preparePlatformJob = async (platform, payload, sourceTabId) => {
   if (!PLATFORM_URLS[platform]) throw new Error('不支持的生图平台。');
   const tab = await findPlatformTab(platform);
+  if (tab?.id && await textLeaseForTab(tab.id)) throw new Error('该页面正执行文本任务，请先取消或等待完成。');
   await connectPlatformTab(platform, tab);
   const job = { ...await prepareImageForPlatform(payload), platform };
   await saveRoute(job, sourceTabId, tab.id);
@@ -206,3 +214,5 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     return chrome.storage.session.remove(keys);
   }).catch((error) => console.warn('[造图扩展] 平台标签页移除处理失败', error.message));
 });
+
+importScripts('background-text.js');

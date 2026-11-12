@@ -1,3 +1,4 @@
+const TextJobs = require('./lib/text-jobs');
 const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
@@ -424,6 +425,7 @@ const hasMeaningfulObject = (value) => isPlainObject(value) && Object.keys(value
 const normalizeVersionSnapshot = (snapshot, projectId, jobs = {}) => {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
   const normalized = cloneJson(snapshot);
+  delete normalized.textWorkflow;
   const product = normalized.product;
   const hasProduct = isPlainObject(product) && Object.values(product).some((value) => hasMeaningfulText(value));
   const bExecution = isPlainObject(normalized.promptBExecution) ? normalized.promptBExecution : {};
@@ -687,6 +689,8 @@ const withProjectDataMutation = (operation) => {
   return run;
 };
 
+const handleTextJobs = TextJobs.createHandler({ read: readProjectStore, write: writeProjectStore, readBody: (...args) => readJsonBody(...args), send: (...args) => sendJson(...args), queue: withProjectDataMutation, timeoutMs: Number(process.env.ZAOTU_TEXT_TIMEOUT_MS) || 180000 });
+
 const handleImagePackageExport = (req, res) => {
   const match = req.url.match(/^\/api\/projects\/([^/?]+)\/export-images(?:\?.*)?$/);
   const projectId = match ? decodeRoutePart(match[1]) : '';
@@ -854,6 +858,10 @@ const validateImportEnvelope = (body, routeProjectId) => {
     seenUploads.add(entry.path);
     return cloneJson(entry);
   });
+  try {
+    TextJobs.sanitizeImported(project, routeProjectId);
+    for (const version of cleanVersions) { if (version.snapshot) { TextJobs.sanitizeImported(version.snapshot, routeProjectId); delete version.snapshot.textWorkflow; } }
+  } catch (error) { throw importError(error.message); }
   return { project, versions: cleanVersions, templates: cleanTemplates, jobs: cleanJobs, assets: cleanAssets, uploads: cleanUploads };
 };
 
@@ -943,6 +951,7 @@ const handleProjectUnsafe = async (req, res) => {
     let project;
     try { project = JSON.parse(await readBody(req)); } catch { sendJson(res, 400, { error: 'Invalid JSON request.' }); return; }
     if (!project || typeof project !== 'object' || Array.isArray(project)) { sendJson(res, 400, { error: 'Project must be an object.' }); return; }
+    delete project.textWorkflow;
     const updatedAt = new Date().toISOString();
     const existingProject = store[projectId] && typeof store[projectId] === 'object' ? store[projectId] : {};
     const projectB = project.promptBExecution && typeof project.promptBExecution === 'object'
@@ -962,9 +971,11 @@ const handleProjectUnsafe = async (req, res) => {
       ...existingProject,
       ...project,
       ...(existingProject.agent ? { agent: existingProject.agent } : {}),
+      textWorkflow: existingProject.textWorkflow,
       projectId,
       updatedAt
     };
+    TextJobs.invalidate(store[projectId]);
     try { writeProjectStore(store); } catch (error) { console.error('[projects] failed to write store:', error.message); sendJson(res, 500, { error: 'Project could not be saved.' }); return; }
     sendJson(res, 200, { project: store[projectId] });
     return;
@@ -1177,6 +1188,9 @@ const handleProjectVersionsUnsafe = async (req, res) => {
       return;
     }
     const restoredProject = cloneJson(sourceVersion.snapshot);
+    delete restoredProject.textWorkflow;
+    restoredProject.textWorkflow = cloneJson(projects[projectId].textWorkflow || TextJobs.container(projects[projectId]));
+    TextJobs.invalidate(restoredProject, 'version_replaced', true);
     restoredProject.projectId = projectId;
     restoredProject.updatedAt = new Date().toISOString();
     const existingProject = projects[projectId] && typeof projects[projectId] === 'object' ? projects[projectId] : {};
@@ -1397,6 +1411,7 @@ const handleGenerationJobsUnsafe = async (req, res) => {
       return;
     }
     const bExecution = executionValidation.value;
+    if (String(bExecution.source || '').startsWith('web-text:') && (bExecution.source !== `web-text:${input.textProvenance?.jobId}` || !TextJobs.imageSourceValid(readProjectStore()[projectId], input.textProvenance))) { sendJson(res, 409, { error: 'Text provenance is stale or missing.' }); return; }
     const bSource = input.bSnapshot && typeof input.bSnapshot === 'object' ? input.bSnapshot : input;
     const includePlatformOverridesInSnapshot = hasOwn(bSource, 'platform_overrides') || hasOwn(bSource, 'platformOverrides');
     const rawPositivePrompt = bSource.positive_prompt ?? bSource.positivePrompt ?? (input.bSnapshot ? '' : input.prompt);
@@ -1963,6 +1978,7 @@ const persistProjectAgentRun = (projectId, run, { isNewRun = false, acceptDraft 
   }
   project.updatedAt = nowIso();
   store[projectId] = project;
+  TextJobs.invalidate(project);
   try {
     writeProjectStore(store);
     return { ok: true, project, run };
@@ -2245,6 +2261,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && /^\/api\/projects\/[^/?]+\/export(?:\?.*)?$/.test(req.url)) { await handleProjectExport(req, res); return; }
   if (req.method === 'POST' && /^\/api\/projects\/[^/?]+\/import(?:\?.*)?$/.test(req.url)) { await handleProjectImport(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/agent-runs(?:\/[^/?]+(?:\/(?:accept|restore|cancel))?)?(?:\?.*)?$/.test(req.url)) { await handleAgentRuns(req, res); return; }
+  if (/^\/api\/projects\/[^/?]+\/text-jobs(?:[/?]|$)/.test(req.url)) { await handleTextJobs(req, res); return; }
   if (/^\/(api\/projects\/[^/?]+\/generation-jobs)/.test(req.url)) { await handleGenerationJobs(req, res); return; }
   if (/^\/api\/projects\/[^/?]+\/(?:result-assets|assets)(?:\/|\?|$)/.test(req.url) && !(req.method === 'POST' && /^\/api\/projects\/[^/?]+\/assets(?:\?|$)/.test(req.url))) {
     if (req.method === 'GET') { await handleResultAssets(req, res); return; }

@@ -7,8 +7,25 @@ const post = (type, payload = {}) => {
 
 window.addEventListener('message', (event) => {
   if (event.source !== window || event.data?.source !== 'zaotu-workbench') return;
-  if (event.data.type === 'DOUBAO_PREPARE' || event.data.type === 'PLATFORM_PREPARE') {
+  if (['TEXT_REPLAY', 'TEXT_ACK'].includes(event.data.type)) {
+    const job = event.data.job;
+    if (!job?.source) return;
+    chrome.runtime.sendMessage({ type: event.data.type === 'TEXT_ACK' ? 'ZAOTU_ACK_TEXT' : 'ZAOTU_REPLAY_TEXT', kind: 'prompt_b', protocolVersion: 'text-v1', projectId: job.projectId, jobId: job.jobId, attemptId: job.attemptId, routeSession: job.routeSession, sourceFingerprint: job.source.fingerprint, platform: job.platform, eventId: event.data.eventId });
+  }
+  if (['TEXT_PREPARE', 'TEXT_CANCEL'].includes(event.data.type)) {
+  const job = event.data.job;
+  chrome.runtime.sendMessage(event.data.type === 'TEXT_PREPARE'
+    ? { type: 'ZAOTU_PREPARE_TEXT', job }
+    : { type: 'ZAOTU_CANCEL_TEXT', kind: 'prompt_b', protocolVersion: 'text-v1', projectId: job.projectId, jobId: job.jobId, attemptId: job.attemptId, routeSession: job.routeSession, sourceFingerprint: job.source.fingerprint, platform: job.platform }, (response) => {
+      if (event.data.type === 'TEXT_PREPARE' && (chrome.runtime.lastError || !response?.ok)) post('TEXT_EVENT', { kind: 'prompt_b', protocolVersion: 'text-v1', projectId: job.projectId, jobId: job.jobId, attemptId: job.attemptId, routeSession: job.routeSession, sourceFingerprint: job.source.fingerprint, platform: job.platform, state: 'failed', errorCode: response?.errorCode || 'EXTENSION_DISCONNECTED' });
+    });
+  }
+  if (event.data.type === 'DOUBAO_PREPARE' || event.data.type === 'PLATFORM_PREPARE' || event.data.type === 'PLATFORM_PREPARE_V2') {
     const platform = event.data.platform || 'doubao';
+    if (platform === 'doubao' && event.data.type !== 'PLATFORM_PREPARE_V2') {
+      post('PLATFORM_ERROR', { platform, jobId: event.data.payload?.jobId, attemptId: event.data.payload?.attemptId, state: 'adapter_error', errorCode: 'ADAPTER_VERSION_MISMATCH', message: '工作台仍在使用旧版豆包发送协议，请保存编辑并刷新工作台页面；本次未发送。' });
+      return;
+    }
     new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ type: platform === 'doubao' ? 'ZAOTU_PREPARE_DOUBAO' : 'ZAOTU_PREPARE_PLATFORM', platform, payload: event.data.payload }, (response) => {
         if (chrome.runtime.lastError) reject(new Error(`扩展后台通信失败：${chrome.runtime.lastError.message}`));
@@ -41,10 +58,14 @@ window.addEventListener('message', (event) => {
   }
 });
 
-post('DOUBAO_EXTENSION_READY');
+post('DOUBAO_EXTENSION_READY', { extensionVersion: chrome.runtime.getManifest().version, textProtocolVersion: 'text-v1', textAdapterVersion: '0.5.1' });
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'ZAOTU_RESULT_CANDIDATES') post('PLATFORM_RESULT_CANDIDATES', { platform: message.platform || 'doubao', jobId: message.jobId, attemptId: message.attemptId, state: 'result_ready', message: '平台结果已同步。', results: message.results });
   if (message?.type === 'ZAOTU_IMPORTED_RESULT') post('DOUBAO_IMPORTED_RESULT', { result: message.result });
   if (message?.type === 'ZAOTU_STATUS') post('PLATFORM_STATUS', { platform: message.platform || 'doubao', jobId: message.jobId, attemptId: message.attemptId, timestamp: message.timestamp, state: message.state, message: message.message, errorCode: message.errorCode, results: message.results });
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'ZAOTU_TEXT_EVENT') post('TEXT_EVENT', { ...message, type: 'TEXT_EVENT' });
 });

@@ -2,6 +2,8 @@
 
 当前项目使用 Node 内置模块提供 DeepSeek 后端代理，Nginx 负责静态文件和 `/api/` 反向代理。以下命令在 Ubuntu 22.04 服务器执行。
 
+当前仍处于 V2.0 开发与手动验收，不能据本说明宣称已生产部署。知识库从零建设、内容待用户收集，网页模型生成 B 尚未实现；产品目标见 `PROJECT_REQUIREMENTS.md`，实现状态统一见 `agent/PROGRESS.md`。
+
 ## 发布前本地检查
 
 在项目根目录运行：
@@ -29,6 +31,8 @@ sudo apt install -y nodejs
 ```text
 /var/www/zaotu/
 ```
+
+不要把 `knowledge/sources/`、`docs/archive/`、旧备份、`.git/`、QA 截图/日志和私有资料作为公开静态内容整体上传。知识库未来的持久化位置与授权访问在实现时单独设计；现有 Node 仅提供静态白名单，Nginx 直接静态服务不能据此推断具有相同保护。
 
 目录中至少应包含 `index.html`、`styles.css`、`server.js`、`.env`、`assets/`、`agent/` 和 `lib/`。`.env` 中设置 `DEEPSEEK_API_KEY`，不要提交到 Git。服务会在项目目录下创建 `data/projects.json` 保存项目状态，并将上传的商品图片写入 `data/uploads/`，请确保运行 Node 服务的用户对 `data/` 具有读写权限。
 

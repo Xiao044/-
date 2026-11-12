@@ -43,7 +43,7 @@ for (const action of ['confirmPrompt', 'resendPromptB']) {
     wait.resolve({ ok: true }); await first;
     assert.equal(c.promptB, '新 B\n柔和光线'); assert.equal(c.promptBEdit, null); assert.equal(c.promptBVersion, 2); assert.equal(c.generationJobId, ''); assert.deepEqual(plain(c.generatedResults), []); assert.equal(c.activeBOperation, null);
     assert.deepEqual(withoutTime(s.requests[0].body), s.snapshot(), 'saved candidate must equal committed project');
-    assert.equal(s.calls.filter(([kind]) => kind === 'timer').length, action === 'resendPromptB' ? 1 : 0);
+    assert.equal(s.calls.filter(([kind]) => kind === 'timer').length, 0);
   });
   test(`${action}: failure can retry once, invalid input and cancelled confirmation never PUT`, async () => {
     const s = setup(), c = s.context; let ok = false;
@@ -77,8 +77,14 @@ for (const action of ['confirmPrompt', 'resendPromptB']) {
 test('unchanged B preserves its version, provenance and downstream for confirmation and resend', async () => {
   for (const action of ['confirmPrompt', 'resendPromptB']) { const s = setup(), c = s.context; s.edit({ positivePrompt: '旧 B', negativePrompt: '旧负面', aspectRatio: '4:5', platformParamsText: '{"seed":42}' }); await c.bui[action](); assert.equal(c.promptBVersion, 1); assert.equal(c.promptBSource, 'template:old@v2'); assert.equal(c.generationJobId, 'job-old'); assert.equal(c.generatedResults.length, 1); assert.equal(c.promptBEdit, null); assert.deepEqual(withoutTime(s.requests[0].body), s.snapshot()); }
 });
-test('successful resend sends once only while its confirmed project, A and B remain current', async () => {
-  for (const mutation of ['none', 'project', 'a', 'b', 'platform']) { const s = setup(), c = s.context; await c.bui.resendPromptB(); const timers = s.calls.filter(([kind]) => kind === 'timer'); assert.equal(timers.length, 1); if (mutation === 'project') c.projectSession++; if (mutation === 'a') c.descriptionA = 'changed A'; if (mutation === 'b') s.edit({ positivePrompt: 'changed B' }); if (mutation === 'platform') c.selectedGenerationPlatforms.add('gemini'); await timers[0][1](); assert.equal(s.calls.filter(([kind]) => kind === 'generate').length, mutation === 'none' ? 1 : 0, mutation); }
+test('successful compatibility resend never schedules image sending, including subsequent project/A/B/platform changes', async () => {
+  for (const mutation of ['none', 'project', 'a', 'b', 'platform']) {
+    const s = setup(), c = s.context; await c.bui.resendPromptB();
+    if (mutation === 'project') c.projectSession++; if (mutation === 'a') c.descriptionA = 'changed A'; if (mutation === 'b') s.edit({ positivePrompt: 'changed B' }); if (mutation === 'platform') c.selectedGenerationPlatforms.add('gemini');
+    assert.equal(s.calls.filter(([kind]) => kind === 'timer').length, 0);
+    assert.equal(s.calls.filter(([kind]) => kind === 'generate').length, 0);
+    assert.equal(s.requests.length, 1);
+  }
 });
 test('pending B locks its real controls and A/C sends and retries before any side effect', async () => {
   const s = setup(), c = s.context, wait = deferred(), notice = { hidden: true, textContent: '' }, selected = { disabled: false };
@@ -127,10 +133,11 @@ test('B waits for an already started project replacement before saving a candida
   const before = s.snapshot(); await c.bui.confirmPrompt(); assert.deepEqual(s.snapshot(), before); assert.equal(s.requests.length, 0); assert.ok(s.calls.some(([kind, message]) => kind === 'toast' && /项目正在更新/.test(message)));
   c.window.confirm = () => false; wait.resolve(JSON.stringify({ project: { projectId: c.projectId } })); await importing; assert.equal(c.projectWriteCount, 0); c.window.confirm = () => true; await c.bui.confirmPrompt(); assert.equal(s.requests.length, 1);
 });
-test('only the latest successful B resend may run an equal-content deferred generation callback', async () => {
+test('repeated equal-content compatibility saves never defer image generation', async () => {
   const s = setup(), c = s.context; await c.bui.resendPromptB(); await c.bui.resendPromptB();
-  const timers = s.calls.filter(([kind]) => kind === 'timer'); assert.equal(timers.length, 2); for (const [, run] of timers) await run();
-  assert.equal(s.calls.filter(([kind]) => kind === 'generate').length, 1);
+  const timers = s.calls.filter(([kind]) => kind === 'timer'); assert.equal(timers.length, 0);
+  assert.equal(s.calls.filter(([kind]) => kind === 'generate').length, 0);
+  assert.equal(s.requests.length, 2);
 });
 test('pending B rejects result uploading and result archival before changing current downstream', async () => {
   const s = setup(), c = s.context, wait = deferred(); c.detailContent = { querySelector: () => null }; c.resultKey = (result) => result.id;
@@ -187,13 +194,15 @@ test('a result archive started first finishes before B can submit', async () => 
   archive.resolve({ ok: true, json: async () => ({}) }); await archiving; await c.serverSyncQueue; assert.equal(c.projectWriteCount, 0); assert.equal(c.generatedResults[0].jobRecorded, true);
   await c.bui.confirmPrompt(); assert.equal(c.promptBEdit, null); assert.deepEqual(withoutTime(s.requests.at(-1).body), s.snapshot());
 });
-test('two equal successful resends before timers with no job create exactly one real generation POST', async () => {
+test('two equal successful compatibility saves with no job create no generation POST', async () => {
   const s = setup(), c = s.context; c.progress = 4; c.generationJobId = ''; c.generationResendSourceJobId = ''; c.generationRequestKey = ''; c.generatedResults = []; c.resultGenerated = false; c.resultSelected = -1;
   c.detailContent = { querySelector: () => null }; c.isExampleProductImage = () => true; c.window.location = { href: 'http://localhost:5173/' }; c.window.postMessage = (data) => s.calls.push(['platform-post', data]);
-  vm.runInContext(['guardAConfirmation', 'generateResults'].map(declaration).join('\n'), c);
+  c.doubaoExtensionVersion = '0.5.1';
+  vm.runInContext(['guardAConfirmation', 'dispatchPlatformPrepare', 'generateResults'].map(declaration).join('\n'), c);
   c.fetch = async (url, options) => { s.requests.push({ url, method: options.method, body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ job: { jobId: 'job-real', platforms: { doubao: { attemptId: 'attempt-new' } } } }) }; };
-  await c.bui.resendPromptB(); await c.bui.resendPromptB(); const timers = s.calls.filter(([kind]) => kind === 'timer'); assert.equal(timers.length, 2); for (const [, run] of timers) run(); await tick();
-  assert.equal(s.requests.filter((request) => request.method === 'POST' && request.url.endsWith('/generation-jobs')).length, 1); assert.equal(c.generationJobId, 'job-real'); assert.equal(s.calls.filter(([kind]) => kind === 'platform-post').length, 1);
+  await c.bui.resendPromptB(); await c.bui.resendPromptB(); const timers = s.calls.filter(([kind]) => kind === 'timer'); assert.equal(timers.length, 0); await tick();
+  assert.equal(s.requests.filter((request) => request.method === 'POST' && request.url.endsWith('/generation-jobs')).length, 0); assert.equal(c.generationJobId, ''); assert.equal(s.calls.filter(([kind]) => kind === 'platform-post').length, 0);
+  assert.equal(s.requests.filter((request) => request.method === 'PUT').length, 2);
 });
 test('editing a non-template B preserves its existing non-template source while clearing template references', async () => {
   const s = setup(), c = s.context; c.promptBSource = 'manual'; await c.bui.confirmPrompt(); assert.equal(c.promptBSource, 'manual'); assert.equal(c.promptBTemplateId, ''); assert.equal(c.promptBTemplateVersion, 0); assert.equal(s.requests[0].body.promptBExecution.source, 'manual');
